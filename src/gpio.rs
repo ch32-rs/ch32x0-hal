@@ -550,6 +550,14 @@ macro_rules! foreach_pin {
         __foreach_pin_inner!((PA13,GPIOA,0,13));
         __foreach_pin_inner!((PA14,GPIOA,0,14));
         __foreach_pin_inner!((PA15,GPIOA,0,15));
+        __foreach_pin_inner!((PA16,GPIOA,0,16));
+        __foreach_pin_inner!((PA17,GPIOA,0,17));
+        __foreach_pin_inner!((PA18,GPIOA,0,18));
+        __foreach_pin_inner!((PA19,GPIOA,0,19));
+        __foreach_pin_inner!((PA20,GPIOA,0,20));
+        __foreach_pin_inner!((PA21,GPIOA,0,21));
+        __foreach_pin_inner!((PA22,GPIOA,0,22));
+        __foreach_pin_inner!((PA23,GPIOA,0,23));
 
         __foreach_pin_inner!((PB0,GPIOB,1,0));
         __foreach_pin_inner!((PB1,GPIOB,1,1));
@@ -567,6 +575,12 @@ macro_rules! foreach_pin {
         __foreach_pin_inner!((PB13,GPIOB,1,13));
         __foreach_pin_inner!((PB14,GPIOB,1,14));
         __foreach_pin_inner!((PB15,GPIOB,1,15));
+        __foreach_pin_inner!((PB16,GPIOB,1,16));
+        __foreach_pin_inner!((PB17,GPIOB,1,17));
+        __foreach_pin_inner!((PB18,GPIOB,1,18));
+        __foreach_pin_inner!((PB19,GPIOB,1,19));
+        __foreach_pin_inner!((PB20,GPIOB,1,20));
+        __foreach_pin_inner!((PB21,GPIOB,1,21));
 
         __foreach_pin_inner!((PC0,GPIOC,2,0));
         __foreach_pin_inner!((PC1,GPIOC,2,1));
@@ -580,6 +594,10 @@ macro_rules! foreach_pin {
         __foreach_pin_inner!((PC11,GPIOC,2,11));
         __foreach_pin_inner!((PC14,GPIOC,2,14));
         __foreach_pin_inner!((PC15,GPIOC,2,15));
+        __foreach_pin_inner!((PC16,GPIOC,2,16));
+        __foreach_pin_inner!((PC17,GPIOC,2,17));
+        __foreach_pin_inner!((PC18,GPIOC,2,18));
+        __foreach_pin_inner!((PC19,GPIOC,2,19));
 
 
     };

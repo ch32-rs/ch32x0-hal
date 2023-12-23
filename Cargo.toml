@@ -1,0 +1,49 @@
+[package]
+name = "ch32x0-hal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ch32x0 = { version = "0.1.6", features = [
+    "ch32x035",
+    "rt",
+] }
+fugit = "0.3.7"
+
+qingke = "0.1.3"
+# ch32v-rt = "0.0.2"
+riscv-rt = "0.11.0"
+
+
+embedded-hal-02 = { package = "embedded-hal", version = "0.2.7", features = [
+    "unproven",
+] }
+embedded-hal-1 = { version = "=1.0.0-rc.3", package = "embedded-hal" }
+
+
+[dev-dependencies]
+panic-halt = "0.2.0"
+
+[features]
+default = ["ch32x035f8u6"]
+
+device-selected = []
+
+
+# 62K, 20K
+ch32x035r8t6 = ["device-selected"]
+ch32x035c8t6 = ["device-selected"]
+ch32x035g8u6 = ["device-selected"]
+ch32x035g8r6 = ["device-selected"]
+ch32x035f8u6 = ["device-selected"]
+# 48K, 20K
+ch32x035f7p6 = []
+# 62K, 20K
+ch32x034f8u6 = []
+ch32x034f8p6 = []
+ch32x033f8p6 = []
+
+[profile.release]
+strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
+lto = true
+opt-level = "z" # Optimize for size.

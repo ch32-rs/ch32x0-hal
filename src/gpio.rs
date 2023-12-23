@@ -268,7 +268,7 @@ impl<'d, T: Pin> Output<'d, T> {
     }
 }
 
-// TODO: OutputOpenDrain
+// NOTE: no OutputOpenDrain support
 
 pub(crate) mod sealed {
     use super::*;

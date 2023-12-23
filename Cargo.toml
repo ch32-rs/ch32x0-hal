@@ -7,7 +7,7 @@ edition = "2021"
 ch32x0 = { version = "0.1.6", features = [
     "ch32x035",
     "rt",
-] }
+], path = "../ch32-rs-nightlies/ch32x0" }
 fugit = "0.3.7"
 
 qingke = "0.1.3"

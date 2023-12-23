@@ -11,4 +11,15 @@ pub mod signature;
 
 mod peripheral;
 pub use peripheral::*;
+pub use peripherals::Peripherals;
 pub mod peripherals;
+
+pub mod gpio;
+
+mod critical_section;
+
+pub fn init() -> Peripherals {
+    gpio::init();
+
+    peripherals::Peripherals::take()
+}

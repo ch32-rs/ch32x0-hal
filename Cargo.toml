@@ -19,7 +19,8 @@ embedded-hal-02 = { package = "embedded-hal", version = "0.2.7", features = [
     "unproven",
 ] }
 embedded-hal-1 = { version = "=1.0.0-rc.3", package = "embedded-hal" }
-critical-section = "1.1.2"
+critical-section = { version = "1.1.2", features = ["restore-state-u8"] }
+defmt = { version = "0.3.5", optional = true }
 
 
 [dev-dependencies]

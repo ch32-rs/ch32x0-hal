@@ -17,7 +17,9 @@ pub mod peripherals;
 
 pub mod exti;
 pub mod gpio;
+pub mod pioc;
 pub mod signature;
+pub mod spi;
 pub mod usart;
 
 mod critical_section;

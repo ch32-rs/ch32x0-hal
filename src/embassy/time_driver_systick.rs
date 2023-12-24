@@ -4,6 +4,7 @@ use core::cell::Cell;
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use core::{mem, ptr};
 
+use ch32x0::ch32x035::Interrupt;
 use critical_section::{CriticalSection, Mutex};
 use embassy_time::driver::{AlarmHandle, Driver};
 
@@ -169,13 +170,10 @@ extern "C" fn SysTick() {
 }
 
 pub(crate) fn init() {
-    use crate::pac::interrupt::{self, Interrupt};
-
     DRIVER.init();
 
     // enable interrupt
     unsafe {
-        let pfic = &*pac::PFIC::PTR;
-        pfic.ienr1.write(|w| w.bits(1 << Interrupt::SYS_TICK as u16));
+        qingke::pfic::enable_interrupt(Interrupt::SYS_TICK as u8);
     }
 }

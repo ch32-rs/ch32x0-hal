@@ -2,6 +2,8 @@
 MEMORY
 {
 	FLASH : ORIGIN = 0x00000000, LENGTH = 62k
+	/* Use PIOC
+	/* RAM : ORIGIN = 0x20000000, LENGTH = 16k */
 	RAM : ORIGIN = 0x20000000, LENGTH = 20k
 }
 
@@ -67,8 +69,8 @@ PROVIDE(UART4 = DefaultHandler);
 PROVIDE(DMA_CHANNEL8 = DefaultHandler);
 PROVIDE(USBFS = DefaultHandler);
 PROVIDE(USBFS_WKUP = DefaultHandler);
-
-
+PROVIDE(PIOC = DefaultHandler);
+PROVIDE(OPA = DefaultHandler);
 PROVIDE(USBPD = DefaultHandler);
 PROVIDE(USBPD_WKUP = DefaultHandler);
 PROVIDE(TIM2_CC = DefaultHandler);

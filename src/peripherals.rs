@@ -50,23 +50,6 @@ crate::peripherals! {
     EXTI22 <= virtual,
     EXTI23 <= virtual,
 
-    PC0 <= virtual,
-    PC1 <= virtual,
-    PC2 <= virtual,
-    PC3 <= virtual,
-    PC4 <= virtual,
-    PC5 <= virtual,
-    PC6 <= virtual,
-    PC7 <= virtual,
-    PC10 <= virtual,
-    PC11 <= virtual,
-    PC14 <= virtual, // CC1
-    PC15 <= virtual, // CC2
-    PC16 <= virtual,
-    PC17 <= virtual,
-    PC18 <= virtual, // DIO
-    PC19 <= virtual, // DCK
-
     PA0 <= virtual,
     PA1 <= virtual,
     PA2 <= virtual,
@@ -88,7 +71,7 @@ crate::peripherals! {
     PA18 <= virtual,
     PA19 <= virtual,
     PA20 <= virtual,
-    PA21 <= virtual,
+    PA21 <= virtual, // RST
     PA22 <= virtual,
     PA23 <= virtual,
 
@@ -99,9 +82,9 @@ crate::peripherals! {
     PB4 <= virtual,
     PB5 <= virtual,
     PB6 <= virtual,
-    PB7 <= virtual,
+    PB7 <= virtual, // RST for TSSOP20 CH32X033
     PB8 <= virtual,
-    PB9 <= virtual,
+    PB9 <= virtual, // MCO
     PB10 <= virtual,
     PB11 <= virtual,
     PB12 <= virtual,
@@ -114,4 +97,21 @@ crate::peripherals! {
     PB19 <= virtual,
     PB20 <= virtual,
     PB21 <= virtual,
+
+    PC0 <= virtual,
+    PC1 <= virtual,
+    PC2 <= virtual,
+    PC3 <= virtual, // RST for QSOP28/TSSOP20 CH32X035
+    PC4 <= virtual,
+    PC5 <= virtual,
+    PC6 <= virtual,
+    PC7 <= virtual,
+    PC10 <= virtual,
+    PC11 <= virtual,
+    PC14 <= virtual, // CC1
+    PC15 <= virtual, // CC2
+    PC16 <= virtual, // USB_DM
+    PC17 <= virtual, // USB_DP
+    PC18 <= virtual, // DIO, PIOC_IO0
+    PC19 <= virtual, // DCK, PIOC_IO1
 }

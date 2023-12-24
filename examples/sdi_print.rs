@@ -5,11 +5,9 @@
 
 use core::arch::asm;
 
-use ch32x0_hal as hal;
 use embedded_hal_1::delay::DelayNs;
-use panic_halt as _;
-
 use hal::println;
+use {ch32x0_hal as hal, panic_halt as _};
 
 #[riscv_rt::entry]
 fn main() -> ! {

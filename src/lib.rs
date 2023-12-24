@@ -1,7 +1,6 @@
 #![no_std]
 
 pub use ch32x0::ch32x035 as pac;
-
 pub use pac::interrupt;
 
 pub mod rt;
@@ -16,6 +15,7 @@ pub use peripheral::*;
 pub use peripherals::Peripherals;
 pub mod peripherals;
 
+pub mod exti;
 pub mod gpio;
 pub mod signature;
 pub mod usart;
@@ -32,6 +32,10 @@ pub fn init(config: Config) -> Peripherals {
     rcc::init();
 
     gpio::init();
+
+    ::critical_section::with(|cs| unsafe {
+        exti::init(cs);
+    });
 
     peripherals::Peripherals::take()
 }

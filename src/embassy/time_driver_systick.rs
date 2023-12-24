@@ -112,15 +112,13 @@ impl Driver for SystickDriver {
         rb.cnt.read().bits() / (self.period.load(Ordering::Relaxed) as u64)
     }
     unsafe fn allocate_alarm(&self) -> Option<AlarmHandle> {
-        let id = self
-            .alarm_count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |x| {
-                if x < ALARM_COUNT as u8 {
-                    Some(x + 1)
-                } else {
-                    None
-                }
-            });
+        let id = self.alarm_count.fetch_update(Ordering::AcqRel, Ordering::Acquire, |x| {
+            if x < ALARM_COUNT as u8 {
+                Some(x + 1)
+            } else {
+                None
+            }
+        });
 
         match id {
             Ok(id) => Some(AlarmHandle::new(id)),
@@ -178,7 +176,6 @@ pub(crate) fn init() {
     // enable interrupt
     unsafe {
         let pfic = &*pac::PFIC::PTR;
-        pfic.ienr1
-            .write(|w| w.bits(1 << Interrupt::SYS_TICK as u16));
+        pfic.ienr1.write(|w| w.bits(1 << Interrupt::SYS_TICK as u16));
     }
 }

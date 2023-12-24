@@ -9,7 +9,7 @@
 
 use core::convert::Infallible;
 
-use crate::{impl_peripheral, into_ref, pac, peripherals, Peripheral, PeripheralRef};
+use crate::{exti, impl_peripheral, into_ref, pac, peripherals, Peripheral, PeripheralRef};
 
 /// GPIO flexible pin.
 ///
@@ -307,9 +307,7 @@ pub(crate) mod sealed {
             if n < 16 {
                 self.block().bshr.write(|w| unsafe { w.bits(1 << n) });
             } else {
-                self.block()
-                    .bsxr
-                    .write(|w| unsafe { w.bits(1 << (n - 16)) });
+                self.block().bsxr.write(|w| unsafe { w.bits(1 << (n - 16)) });
             }
         }
 
@@ -318,13 +316,9 @@ pub(crate) mod sealed {
         fn set_low(&self) {
             let n = self._pin();
             if n < 16 {
-                self.block()
-                    .bshr
-                    .write(|w| unsafe { w.bits(1 << (n + 16)) });
+                self.block().bshr.write(|w| unsafe { w.bits(1 << (n + 16)) });
             } else {
-                self.block()
-                    .bsxr
-                    .write(|w| unsafe { w.bits(1 << (n - 16 + 16)) });
+                self.block().bsxr.write(|w| unsafe { w.bits(1 << (n - 16 + 16)) });
             }
         }
 
@@ -400,12 +394,8 @@ pub(crate) mod sealed {
             }
 
             match pull {
-                Pull::Up => block
-                    .outdr
-                    .modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
-                Pull::Down => block
-                    .outdr
-                    .modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
+                Pull::Up => block.outdr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
+                Pull::Down => block.outdr.modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
                 _ => {}
             }
         }
@@ -481,7 +471,7 @@ pub(crate) mod sealed {
 }
 
 pub trait Pin: Peripheral<P = Self> + Into<AnyPin> + sealed::Pin + Sized + 'static {
-    //    type ExtiChannel: crate::exti::Channel;
+    type ExtiChannel: crate::exti::Channel;
 
     /// Number of the pin within the port (0..31)
     #[inline]
@@ -522,7 +512,9 @@ impl AnyPin {
 }
 
 impl_peripheral!(AnyPin);
-impl Pin for AnyPin {}
+impl Pin for AnyPin {
+    type ExtiChannel = exti::AnyChannel;
+}
 impl sealed::Pin for AnyPin {
     #[inline]
     fn pin_port(&self) -> u8 {
@@ -536,76 +528,79 @@ macro_rules! foreach_pin {
             $(($pat) => $code;)*
             ($_:tt) => {}
         }
-        __foreach_pin_inner!((PA1,GPIOA,0,1));
-        __foreach_pin_inner!((PA2,GPIOA,0,2));
-        __foreach_pin_inner!((PA3,GPIOA,0,3));
-        __foreach_pin_inner!((PA4,GPIOA,0,4));
-        __foreach_pin_inner!((PA5,GPIOA,0,5));
-        __foreach_pin_inner!((PA6,GPIOA,0,6));
-        __foreach_pin_inner!((PA7,GPIOA,0,7));
-        __foreach_pin_inner!((PA8,GPIOA,0,8));
-        __foreach_pin_inner!((PA9,GPIOA,0,9));
-        __foreach_pin_inner!((PA10,GPIOA,0,10));
-        __foreach_pin_inner!((PA11,GPIOA,0,11));
-        __foreach_pin_inner!((PA12,GPIOA,0,12));
-        __foreach_pin_inner!((PA13,GPIOA,0,13));
-        __foreach_pin_inner!((PA14,GPIOA,0,14));
-        __foreach_pin_inner!((PA15,GPIOA,0,15));
-        __foreach_pin_inner!((PA16,GPIOA,0,16));
-        __foreach_pin_inner!((PA17,GPIOA,0,17));
-        __foreach_pin_inner!((PA18,GPIOA,0,18));
-        __foreach_pin_inner!((PA19,GPIOA,0,19));
-        __foreach_pin_inner!((PA20,GPIOA,0,20));
-        __foreach_pin_inner!((PA21,GPIOA,0,21));
-        __foreach_pin_inner!((PA22,GPIOA,0,22));
-        __foreach_pin_inner!((PA23,GPIOA,0,23));
+        __foreach_pin_inner!((PA1,GPIOA,0,1, EXTI1));
+        __foreach_pin_inner!((PA2,GPIOA,0,2, EXTI2));
+        __foreach_pin_inner!((PA3,GPIOA,0,3, EXTI3));
+        __foreach_pin_inner!((PA4,GPIOA,0,4, EXTI4));
+        __foreach_pin_inner!((PA5,GPIOA,0,5, EXTI5));
+        __foreach_pin_inner!((PA6,GPIOA,0,6, EXTI6));
+        __foreach_pin_inner!((PA7,GPIOA,0,7, EXTI7));
+        __foreach_pin_inner!((PA8,GPIOA,0,8, EXTI8));
+        __foreach_pin_inner!((PA9,GPIOA,0,9, EXTI9));
+        __foreach_pin_inner!((PA10,GPIOA,0,10, EXTI10));
+        __foreach_pin_inner!((PA11,GPIOA,0,11, EXTI11));
+        __foreach_pin_inner!((PA12,GPIOA,0,12, EXTI12));
+        __foreach_pin_inner!((PA13,GPIOA,0,13, EXTI13));
+        __foreach_pin_inner!((PA14,GPIOA,0,14, EXTI14));
+        __foreach_pin_inner!((PA15,GPIOA,0,15, EXTI15));
+        __foreach_pin_inner!((PA16,GPIOA,0,16, EXTI16));
+        __foreach_pin_inner!((PA17,GPIOA,0,17, EXTI17));
+        __foreach_pin_inner!((PA18,GPIOA,0,18, EXTI18));
+        __foreach_pin_inner!((PA19,GPIOA,0,19, EXTI19));
+        __foreach_pin_inner!((PA20,GPIOA,0,20, EXTI20));
+        __foreach_pin_inner!((PA21,GPIOA,0,21, EXTI21));
+        __foreach_pin_inner!((PA22,GPIOA,0,22, EXTI22));
+        __foreach_pin_inner!((PA23,GPIOA,0,23, EXTI23));
 
-        __foreach_pin_inner!((PB0,GPIOB,1,0));
-        __foreach_pin_inner!((PB1,GPIOB,1,1));
-        __foreach_pin_inner!((PB2,GPIOB,1,2));
-        __foreach_pin_inner!((PB3,GPIOB,1,3));
-        __foreach_pin_inner!((PB4,GPIOB,1,4));
-        __foreach_pin_inner!((PB5,GPIOB,1,5));
-        __foreach_pin_inner!((PB6,GPIOB,1,6));
-        __foreach_pin_inner!((PB7,GPIOB,1,7));
-        __foreach_pin_inner!((PB8,GPIOB,1,8));
-        __foreach_pin_inner!((PB9,GPIOB,1,9));
-        __foreach_pin_inner!((PB10,GPIOB,1,10));
-        __foreach_pin_inner!((PB11,GPIOB,1,11));
-        __foreach_pin_inner!((PB12,GPIOB,1,12));
-        __foreach_pin_inner!((PB13,GPIOB,1,13));
-        __foreach_pin_inner!((PB14,GPIOB,1,14));
-        __foreach_pin_inner!((PB15,GPIOB,1,15));
-        __foreach_pin_inner!((PB16,GPIOB,1,16));
-        __foreach_pin_inner!((PB17,GPIOB,1,17));
-        __foreach_pin_inner!((PB18,GPIOB,1,18));
-        __foreach_pin_inner!((PB19,GPIOB,1,19));
-        __foreach_pin_inner!((PB20,GPIOB,1,20));
-        __foreach_pin_inner!((PB21,GPIOB,1,21));
+        __foreach_pin_inner!((PB0,GPIOB,1,0, EXTI0));
+        __foreach_pin_inner!((PB1,GPIOB,1,1, EXTI1));
+        __foreach_pin_inner!((PB2,GPIOB,1,2, EXTI2));
+        __foreach_pin_inner!((PB3,GPIOB,1,3, EXTI3));
+        __foreach_pin_inner!((PB4,GPIOB,1,4, EXTI4));
+        __foreach_pin_inner!((PB5,GPIOB,1,5, EXTI5));
+        __foreach_pin_inner!((PB6,GPIOB,1,6, EXTI6));
+        __foreach_pin_inner!((PB7,GPIOB,1,7, EXTI7));
+        __foreach_pin_inner!((PB8,GPIOB,1,8, EXTI8));
+        __foreach_pin_inner!((PB9,GPIOB,1,9, EXTI9));
+        __foreach_pin_inner!((PB10,GPIOB,1,10, EXTI10));
+        __foreach_pin_inner!((PB11,GPIOB,1,11, EXTI11));
+        __foreach_pin_inner!((PB12,GPIOB,1,12, EXTI12));
+        __foreach_pin_inner!((PB13,GPIOB,1,13, EXTI13));
+        __foreach_pin_inner!((PB14,GPIOB,1,14, EXTI14));
+        __foreach_pin_inner!((PB15,GPIOB,1,15, EXTI15));
+        __foreach_pin_inner!((PB16,GPIOB,1,16, EXTI16));
+        __foreach_pin_inner!((PB17,GPIOB,1,17, EXTI17));
+        __foreach_pin_inner!((PB18,GPIOB,1,18, EXTI18));
+        __foreach_pin_inner!((PB19,GPIOB,1,19, EXTI19));
+        __foreach_pin_inner!((PB20,GPIOB,1,20, EXTI20));
+        __foreach_pin_inner!((PB21,GPIOB,1,21, EXTI21));
 
-        __foreach_pin_inner!((PC0,GPIOC,2,0));
-        __foreach_pin_inner!((PC1,GPIOC,2,1));
-        __foreach_pin_inner!((PC2,GPIOC,2,2));
-        __foreach_pin_inner!((PC3,GPIOC,2,3));
-        __foreach_pin_inner!((PC4,GPIOC,2,4));
-        __foreach_pin_inner!((PC5,GPIOC,2,5));
-        __foreach_pin_inner!((PC6,GPIOC,2,6));
-        __foreach_pin_inner!((PC7,GPIOC,2,7));
-        __foreach_pin_inner!((PC10,GPIOC,2,10));
-        __foreach_pin_inner!((PC11,GPIOC,2,11));
-        __foreach_pin_inner!((PC14,GPIOC,2,14));
-        __foreach_pin_inner!((PC15,GPIOC,2,15));
-        __foreach_pin_inner!((PC16,GPIOC,2,16));
-        __foreach_pin_inner!((PC17,GPIOC,2,17));
-        __foreach_pin_inner!((PC18,GPIOC,2,18));
-        __foreach_pin_inner!((PC19,GPIOC,2,19));
+        __foreach_pin_inner!((PC0,GPIOC,2,0, EXTI0));
+        __foreach_pin_inner!((PC1,GPIOC,2,1, EXTI1));
+        __foreach_pin_inner!((PC2,GPIOC,2,2, EXTI2));
+        __foreach_pin_inner!((PC3,GPIOC,2,3, EXTI3));
+        __foreach_pin_inner!((PC4,GPIOC,2,4, EXTI4));
+        __foreach_pin_inner!((PC5,GPIOC,2,5, EXTI5));
+        __foreach_pin_inner!((PC6,GPIOC,2,6, EXTI6));
+        __foreach_pin_inner!((PC7,GPIOC,2,7, EXTI7));
+        __foreach_pin_inner!((PC10,GPIOC,2,10, EXTI10));
+        __foreach_pin_inner!((PC11,GPIOC,2,11, EXTI11));
+        __foreach_pin_inner!((PC14,GPIOC,2,14, EXTI14));
+        __foreach_pin_inner!((PC15,GPIOC,2,15, EXTI15));
+        __foreach_pin_inner!((PC16,GPIOC,2,16, EXTI16));
+        __foreach_pin_inner!((PC17,GPIOC,2,17, EXTI17));
+        __foreach_pin_inner!((PC18,GPIOC,2,18, EXTI18));
+        __foreach_pin_inner!((PC19,GPIOC,2,19, EXTI19));
 
 
     };
 }
 foreach_pin!(
-    ($pin_name:ident, $port_name:ident, $port_num:expr, $pin_num:expr) => {
-        impl Pin for peripherals::$pin_name {}
+    ($pin_name:ident, $port_name:ident, $port_num:expr, $pin_num:expr, $exti_ch:ident) => {
+        impl Pin for peripherals::$pin_name {
+            // #[cfg(feature = "exti")]
+            type ExtiChannel = peripherals::$exti_ch;
+        }
 
         impl sealed::Pin for peripherals::$pin_name {
             #[inline]

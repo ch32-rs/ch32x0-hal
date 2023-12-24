@@ -1,6 +1,6 @@
-use crate::pac;
-
 use fugit::HertzU32 as Hertz;
+
+use crate::pac;
 
 const HSI_FREQUENCY: Hertz = Hertz::from_raw(48_000_000);
 

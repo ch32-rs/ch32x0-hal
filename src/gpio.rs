@@ -7,6 +7,8 @@
 //! 推挽输出
 //! 复用功能的输入和输出
 
+use core::convert::Infallible;
+
 use crate::{impl_peripheral, into_ref, pac, peripherals, Peripheral, PeripheralRef};
 
 /// GPIO flexible pin.
@@ -279,7 +281,6 @@ pub(crate) mod sealed {
     pub enum AFType {
         Input,
         OutputPushPull,
-        OutputOpenDrain,
     }
 
     pub trait Pin {
@@ -634,4 +635,104 @@ pub(crate) fn init() {
             .iopcen()
             .set_bit()
     });
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::ErrorType for Input<'d, T> {
+    type Error = Infallible;
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::InputPin for Input<'d, T> {
+    #[inline]
+    fn is_high(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_high())
+    }
+
+    #[inline]
+    fn is_low(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_low())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::ErrorType for Output<'d, T> {
+    type Error = Infallible;
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::OutputPin for Output<'d, T> {
+    #[inline]
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        Ok(self.set_high())
+    }
+
+    #[inline]
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        Ok(self.set_low())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::StatefulOutputPin for Output<'d, T> {
+    #[inline]
+    fn is_set_high(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_set_high())
+    }
+
+    /// Is the output pin set as low?
+    #[inline]
+    fn is_set_low(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_set_low())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::ToggleableOutputPin for Output<'d, T> {
+    #[inline]
+    fn toggle(&mut self) -> Result<(), Self::Error> {
+        Ok(self.toggle())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::InputPin for Flex<'d, T> {
+    #[inline]
+    fn is_high(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_high())
+    }
+
+    #[inline]
+    fn is_low(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_low())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::OutputPin for Flex<'d, T> {
+    #[inline]
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        Ok(self.set_high())
+    }
+
+    #[inline]
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        Ok(self.set_low())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::ToggleableOutputPin for Flex<'d, T> {
+    #[inline]
+    fn toggle(&mut self) -> Result<(), Self::Error> {
+        Ok(self.toggle())
+    }
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::ErrorType for Flex<'d, T> {
+    type Error = Infallible;
+}
+
+impl<'d, T: Pin> embedded_hal_1::digital::StatefulOutputPin for Flex<'d, T> {
+    #[inline]
+    fn is_set_high(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_set_high())
+    }
+
+    /// Is the output pin set as low?
+    #[inline]
+    fn is_set_low(&self) -> Result<bool, Self::Error> {
+        Ok(self.is_set_low())
+    }
 }

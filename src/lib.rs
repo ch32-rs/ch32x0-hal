@@ -11,14 +11,14 @@ pub mod rcc;
 pub mod debug;
 pub mod delay;
 
-pub mod signature;
-
 mod peripheral;
 pub use peripheral::*;
 pub use peripherals::Peripherals;
 pub mod peripherals;
 
 pub mod gpio;
+pub mod signature;
+pub mod usart;
 
 mod critical_section;
 #[cfg(feature = "embassy")]

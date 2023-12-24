@@ -4,10 +4,12 @@ use fugit::HertzU32 as Hertz;
 
 const HSI_FREQUENCY: Hertz = Hertz::from_raw(48_000_000);
 
+const DEFAULT_FREQUENCY: Hertz = Hertz::from_raw(12_000_000);
+
 static mut CLOCKS: Clocks = Clocks {
     // Power on default
-    sysclk: HSI_FREQUENCY,
-    hclk: HSI_FREQUENCY,
+    sysclk: DEFAULT_FREQUENCY,
+    hclk: DEFAULT_FREQUENCY,
 };
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -29,4 +31,11 @@ pub(crate) fn init() {
 
     // set hckl = sysclk = APB1
     rcc.cfgr0.modify(|_, w| w.hpre().variant(0));
+
+    unsafe {
+        CLOCKS = Clocks {
+            sysclk: HSI_FREQUENCY,
+            hclk: HSI_FREQUENCY,
+        };
+    }
 }

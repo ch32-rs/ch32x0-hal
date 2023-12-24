@@ -134,7 +134,6 @@ unsafe fn ch32x0_setup_interrupts() {
     }
 
     crate::debug::SDIPrint::enable();
-    crate::println!("begin ok");
     // enable hardware stack push
     asm!(
         "

@@ -24,7 +24,11 @@ mod critical_section;
 #[cfg(feature = "embassy")]
 pub mod embassy;
 
-pub fn init() -> Peripherals {
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct Config {}
+
+pub fn init(config: Config) -> Peripherals {
     rcc::init();
 
     gpio::init();

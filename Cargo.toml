@@ -34,6 +34,7 @@ embassy-executor = { version = "0.4.0", features = [
     "arch-riscv32",
     "executor-thread",
 ] }
+bitfield = "0.14.0"
 
 [features]
 default = ["ch32x035f8u6", "embassy"]

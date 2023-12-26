@@ -4,12 +4,11 @@ use core::cell::Cell;
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use core::{mem, ptr};
 
-use ch32x0::ch32x035::Interrupt;
 use critical_section::{CriticalSection, Mutex};
 use embassy_time::driver::{AlarmHandle, Driver};
 
-// use super::AlarmState;
 use crate::pac;
+use crate::pac::Interrupt;
 
 pub const ALARM_COUNT: usize = 1;
 

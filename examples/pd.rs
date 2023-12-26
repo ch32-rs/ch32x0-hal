@@ -3,7 +3,6 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use aligned::Aligned;
 use bitfield::bitfield;
 use ch32x0::ch32x035::Interrupt;
 use ch32x0_hal as hal;
@@ -110,17 +109,9 @@ pub mod defs {
     pub const DEF_VDM_DP_CONFIG: u8 = 0x11;
 }
 
-// for bmc aux
 const PD_SOP0: u8 = 0b01;
 const PD_SOP1: u8 = 0b10; // Hard Reset
 const PD_SOP2: u8 = 0b11; // Cable Reset
-
-/// TX_SEL
-const TX_SEL_SOP0: u8 = 0b00_00_00_00;
-const TX_SEL_SOP1: u8 = 0b01_01_00_00;
-const TX_SEL_SOP2: u8 = 0b01_00_01_00;
-const TX_SEL_HARD_RESET: u8 = 0b10_10_10_01;
-const TX_SEL_CABLE_RESET: u8 = 0b01_10_00_01;
 
 bitfield! {
     pub struct Header(u16);
@@ -137,8 +128,20 @@ bitfield! {
     pub ext, set_ext : 15;
 }
 
-static mut PD_RX_BUF: Aligned<aligned::A4, [u8; 34]> = Aligned([0; 34]);
-static mut PD_TX_BUF: Aligned<aligned::A4, [u8; 34]> = Aligned([0; 34]);
+#[embassy_executor::task]
+async fn blink(pin: AnyPin) {
+    let mut led = Output::new(pin, Level::Low);
+
+    loop {
+        led.set_high();
+        Timer::after(Duration::from_millis(150)).await;
+        led.set_low();
+        Timer::after(Duration::from_millis(150)).await;
+    }
+}
+
+static mut PD_RX_BUF: [u8; 34] = [0; 34];
+static mut PD_TX_BUF: [u8; 34] = [0; 34];
 
 pub fn parse_package(raw: &[u8]) -> Option<(Header, &[u32])> {
     todo!();
@@ -154,8 +157,8 @@ bitfield! {
    // pub unconstr_power, _ : 27;
   //  pub cap_usb_comm, _ : 26;
   //  pub dual_role_data, _ : 25;
-    pub unchunked_extended_message_support, _ : 24;
-    pub epr_mode, _ : 23;
+  //  pub unchunked_extended_message_support, _ : 24;
+   // pub epr_mode, _ : 23;
    // pub peak_current, _ : 21, 20;
     pub voltage_50mv, _ : 19, 10;
     pub max_current_10ma, _ : 9, 0;
@@ -233,24 +236,13 @@ unsafe extern "C" fn USBPD() {
 
     let status = usbpd.status.read();
 
-    println!("status 0x{:02x}", status.bits());
-
     // 接收完成中断标志
     if status.if_rx_act().bit_is_set() {
         usbpd.status.modify(|_, w| w.if_rx_act().set_bit()); // clear IF
 
         if status.bmc_aux().bits() == PD_SOP0 {
             let len = usbpd.bmc_byte_cnt.read().bits();
-            println!("len {}", len);
-            println!("=> {:02x?}", &PD_RX_BUF[..len as usize]);
-
             if len >= 6 {
-                let header = Header(u16::from_le_bytes([PD_RX_BUF[0], PD_RX_BUF[1]]));
-                println!("H => {:?}", header);
-                // if header.num_data_objs() * 4 + 2 != len {
-                //    println!("!!! invalid len");
-                //   return;
-                // }
                 // If GOODCRC, do not answer and ignore this reception
                 if len != 6 || PD_RX_BUF[0] & 0x1F != defs::DEF_TYPE_GOODCRC {
                     Delay.delay_us(30); // delay 30us answer GoodCRC
@@ -259,30 +251,23 @@ unsafe extern "C" fn USBPD() {
                     PD_TX_BUF[1] = PD_RX_BUF[1] & 0x0E;
                     usbpd.config.modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
 
-                    pd_phy_send_pack(&PD_TX_BUF[..2], TX_SEL_SOP0);
+                    pd_phy_send_pack(&PD_TX_BUF[..2], PD_SOP0);
                 }
+                println!("=> {:02x?}", &PD_RX_BUF[..len as usize]);
                 print_src_cap(&PD_RX_BUF[..len as usize]);
             }
-        } else {
-            println!("aux {}", status.bmc_aux().bits());
         }
     }
     if status.if_tx_end().bit_is_set() {
-        usbpd.status.modify(|_, w| w.if_tx_end().set_bit()); // clear IF
-
         usbpd.port_cc1.modify(|_, w| w.cc_lve().clear_bit());
         usbpd.port_cc2.modify(|_, w| w.cc_lve().clear_bit());
 
-        //  pd_rx_mode();
         //  qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
         println!("tx end");
     }
-    if status.buf_err().bit() {
-        println!("buf err");
-        usbpd.status.modify(|_, w| w.buf_err().set_bit()); // clear IF
-    }
-    usbpd.status.modify(|r, w| unsafe { w.bits(0b11111100) });
+
+    usbpd.status.modify(|r, w| unsafe { w.bits(r.bits()) });
 }
 
 #[embassy_executor::main(entry = "riscv_rt::entry")]
@@ -296,100 +281,161 @@ async fn main(spawner: Spawner) -> ! {
     let input = Input::new(p.PA21, Pull::Up);
     let mut ei = ExtiInput::new(input, p.EXTI21);
 
-    let mut led = Output::new(p.PA4, Level::Low);
+    println!("exti init ok");
+
+    let rcc = unsafe { &*pac::RCC::PTR };
+    let afio = unsafe { &*pac::AFIO::PTR };
+    let usbpd = unsafe { &*pac::USBPD::PTR };
+
+    rcc.ahbpcenr.modify(|_, w| w.usbpd().set_bit()); // enable USBPD
 
     // PC14, PC15
-    let mut pd = UsbPdSink::new(p.PC14, p.PC15);
-    pd.detect();
+    let cc1 = Input::new(p.PC14, Pull::None);
+    let cc2 = Input::new(p.PC15, Pull::None);
 
-    println!("USB PD init ok");
+    // PD 引脚 PC14/PC15 高阈值输入模式
+    // PD 收发器 PHY 上拉限幅配置位: USBPD_PHY_V33
+    afio.ctlr
+        .modify(|_, w| w.usbpd_in_hvt().set_bit().usbpd_phy_v33().set_bit());
 
-    println!("=> dma buf {:p} {:p}", unsafe { PD_RX_BUF.as_mut_ptr() }, unsafe {
-        PD_TX_BUF.as_mut_ptr()
-    });
+    usbpd.config.write(|w| w.pd_dma_en().set_bit());
+
+    usbpd.status.write(|w| {
+        w.buf_err()
+            .set_bit()
+            .if_rx_bit()
+            .set_bit()
+            .if_rx_byte()
+            .set_bit()
+            .if_rx_act()
+            .set_bit()
+            .if_rx_reset()
+            .set_bit()
+            .if_tx_end()
+            .set_bit()
+    }); // write 1 to clear
+
+    pd_phy_reset();
+
+    unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
+
+    pd_rx_mode();
+
+    // init done
+
+    /*
+    // PD_PHY_reeset
+    // - PD_SINK_Init
+    // 0.66V
+
+    usbpd.port_cc1.write(|w| w.cc_ce().v0_66().cc_pd().set_bit());
+    usbpd.port_cc2.write(|w| w.cc_ce().v0_66().cc_pd().set_bit());
+
+    // in pd rx mode
+
+    usbpd.config.modify(|_, w| w.pd_all_clr().set_bit());
+    usbpd.config.modify(|_, w| w.pd_all_clr().clear_bit());
+    usbpd
+        .config
+        .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().pd_dma_en().set_bit());
+
+    usbpd
+        .dma
+        .write(|w| unsafe { w.bits(((PD_RX_BUF.as_ptr() as u32) & 0xFFFF) as u16) });
+
+    usbpd.control.modify(|_, w| w.pd_tx_en().clear_bit());
+
+    // #define UPD_TMR_TX_48M    (80-1)                                             /* timer value for USB PD BMC transmittal @Fsys=48MHz */
+    // #define UPD_TMR_RX_48M    (120-1)                                            /* timer value for USB PD BMC receiving @Fsys=48MHz */
+    // #define UPD_TMR_TX_24M    (40-1)                                             /* timer value for USB PD BMC transmittal @Fsys=24MHz */
+    // #define UPD_TMR_RX_24M    (60-1)                                             /* timer value for USB PD BMC receiving @Fsys=24MHz */
+    // #define UPD_TMR_TX_12M    (20-1)                                             /* timer value for USB PD BMC transmittal @Fsys=12MHz */
+    // #define UPD_TMR_RX_12M    (30-1)                                             /* timer value for USB PD BMC receiving @Fsys=12MHz */
+    usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(120 - 1) });
+    usbpd.control.modify(|_, w| w.bmc_start().set_bit());
+
+    //    ei.wait_for_falling_edge().await;
+    */
+
+    println!("pd init  ok");
+
+    // PD_Init ends
+
+    // GPIO
+    //  spawner.spawn(blink(p.PA4.degrade())).unwrap();
+    let mut led = Output::new(p.PA4, Level::Low);
+
+    // PD_Det_Proc
+    // pull down, in SINK mode
+    usbpd.port_cc1.modify(|_, w| w.cc_pd().set_bit());
+    usbpd.port_cc2.modify(|_, w| w.cc_pd().set_bit());
+
+    usbpd.port_cc1.modify(|_, w| w.cc_ce().v0_22());
+    Delay.delay_us(2);
+    // test if > 0.22V
+    if usbpd.port_cc1.read().pa_cc_ai().bit_is_set() {
+        // cc1 is connected
+        println!("cc1 is connected");
+        usbpd.config.modify(|_, w| w.cc_sel().cc1())
+    } else {
+        usbpd.port_cc2.modify(|_, w| w.cc_ce().v0_22());
+        Delay.delay_us(2);
+        if usbpd.port_cc2.read().pa_cc_ai().bit_is_set() {
+            // cc2 is connected
+            println!("cc2 is connected");
+            usbpd.config.modify(|_, w| w.cc_sel().cc2())
+        } else {
+            // no cc is connected
+            println!("no cc is connected");
+        }
+    }
+    println!(
+        "cc1 pd {} cc2 pd {}",
+        usbpd.port_cc1.read().cc_pd().bit(),
+        usbpd.port_cc2.read().cc_pd().bit()
+    );
+
+    // detect ok
+    // PD_Main_Proc
+
+    // STA_SRC_CONNECT
+    pd_phy_reset();
+    pd_rx_mode();
 
     let mut header = Header(0);
     header.set_msg_type(defs::DEF_TYPE_REQUEST as _);
     header.set_spec_rev(0b10);
     header.set_num_data_objs(1);
-    header.set_ext(false);
-    header.set_power_role(false);
-    header.set_data_role(false); // PD role
-    header.set_msg_id(1);
-
-    let power_data = FixedPowerDataObject(0x0002d12c);
+    header.set_ext(true);
 
     println!("=> h => {:02x?}", &u16::to_le_bytes(header.0));
 
-    let mut req = Request(0x2300b02c);
-    req.set_usb_comm_capable(true);
-    req.set_max_operating_current_10ma(90);
-    //    req.set_epr_mode(true);
-    req.set_capability_mismatch(true);
-
-    req.set_position(3);
-
-    /* Request { .0: 587247660,
-        positioin: 2,
-        give_back: false,
-        capability_mismatch: false,
-        usb_comm_capable: true,
-        no_usb_suspend: true,
-        unchunked_extended_message_support: false,
-        epr_mode: false,
-        operating_current_10ma: 44,
-        max_operating_current_10ma: 44
-    } */
-    /*
+    let mut req = Request(0);
     req.set_position(2); // request 9V
     req.set_operating_current_10ma(30);
     req.set_max_operating_current_10ma(50);
     req.set_no_usb_suspend(true);
-    req.set_capability_mismatch(true);
-    req.set_unchunked_extended_message_support(power_data.unchunked_extended_message_support());
-    req.set_epr_mode(power_data.epr_mode());
-    */
-    println!("=> {:?}", req);
+
+    println!("=> r => {:02x?}", &u32::to_le_bytes(req.0));
 
     unsafe {
         PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
         PD_TX_BUF[2..6].clone_from_slice(&u32::to_le_bytes(req.0));
 
-        // [130, 144, 50, 120, 0, 37]
-        // [161, 97, 44, 145, 1, 8, 44, 2
-
-        println!("=> r => {:?}", &PD_TX_BUF[..6]);
-
         Timer::after(Duration::from_millis(5000)).await;
-        //         pd_phy_send_pack(&PD_TX_BUF[..0], TX_SEL_HARD_RESET);
-        // pd_phy_send_pack(&PD_TX_BUF[..6], TX_SEL_SOP0);
+        //  pd_phy_send_pack(&PD_TX_BUF[..6], PD_SOP0);
         //        pd_rx_mode();
-
-        // will cut power off
-        pd.send_empty(TX_SEL_HARD_RESET);
+        const TX_SEL_HARD_RESET: u8 = 0b10_10_10_01;
+        pd_phy_send_empty(TX_SEL_HARD_RESET);
     }
 
-    Timer::after(Duration::from_millis(2000)).await;
-    pd_rx_mode();
-
-    let mut i = 0;
-
     loop {
-        i += 1;
         Timer::after(Duration::from_millis(5000)).await;
         println!("tick");
 
-        led.toggle();
+        pd_rx_mode();
 
-        if i == 3 {
-            println!("ask for 9V");
-            for _ in 0..4 {
-                unsafe {
-                    pd.send(&PD_TX_BUF[..6], TX_SEL_SOP0);
-                    Timer::after(Duration::from_millis(100)).await;
-                }
-            }
-        }
+        led.toggle();
 
         //        pd_phy_reset();
         //      pd_rx_mode();
@@ -421,7 +467,7 @@ fn pd_rx_mode() {
         .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().pd_dma_en().set_bit());
 
     //    println!("=> {:08x}", usbpd.config.read().bits());
-    //    println!("dma {:p}", unsafe { PD_RX_BUF.as_mut_ptr() });
+    println!("dma {:p}", unsafe { PD_RX_BUF.as_mut_ptr() });
     usbpd
         .dma
         .write(|w| unsafe { w.bits(((PD_RX_BUF.as_mut_ptr() as u32) & 0xFFFF) as u16) });
@@ -437,7 +483,7 @@ fn pd_rx_mode() {
     usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(120 - 1) });
     usbpd.control.modify(|_, w| w.bmc_start().set_bit());
 
-    unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
+    unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8)};
 }
 
 fn pd_phy_send_pack(buf: &[u8], sop: u8) {
@@ -462,228 +508,62 @@ fn pd_phy_send_pack(buf: &[u8], sop: u8) {
 
     usbpd.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx
 
-    usbpd.status.modify(|_, w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
-                                                               //    usbpd.config.modify(|_, w| w.pd_all_clr().set_bit());
-                                                               //  usbpd.config.modify(|_, w| w.pd_all_clr().clear_bit());
-
-    usbpd.control.modify(|_, w| w.bmc_start().set_bit());
+    usbpd.status.modify(|_, w| unsafe { w.bmc_aux().bits(0) }); // clear bmc aux status
 
     // NO wait
 }
 
-pub struct UsbPdSink {
-    _priv: (),
+fn pd_phy_blocking_send_pack(buf: &[u8], sop: u8) {
+    let usbpd = unsafe { &*pac::USBPD::PTR };
+
+    if usbpd.config.read().cc_sel().is_cc1() {
+        usbpd.port_cc1.modify(|_, w| w.cc_lve().set_bit());
+    } else {
+        usbpd.port_cc2.modify(|_, w| w.cc_lve().set_bit());
+    }
+    const UPD_TMR_TX_48M: u16 = 80 - 1;
+
+    usbpd.bmc_clk_cnt.write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
+
+    let dma_addr = buf.as_ptr() as u32 & 0xFFFF;
+
+    usbpd.dma.write(|w| unsafe { w.bits(dma_addr as u16) });
+
+    usbpd.tx_sel.write(|w| unsafe { w.bits(sop) });
+
+    usbpd.bmc_tx_sz.write(|w| unsafe { w.bmc_tx_sz().bits(buf.len() as _) });
+
+    usbpd.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx
+
+    usbpd.status.modify(|_, w| unsafe { w.bmc_aux().bits(0) }); // clear bmc aux status
+
+    // wait
 }
 
-impl UsbPdSink {
-    pub fn new(cc1: peripherals::PC14, cc2: peripherals::PC15) -> Self {
-        let rcc = unsafe { &*pac::RCC::PTR };
-        let afio = unsafe { &*pac::AFIO::PTR };
-        let usbpd = unsafe { &*pac::USBPD::PTR };
+pub fn pd_phy_send_empty(sop: u8) {
+    let rb = unsafe { &*pac::USBPD::PTR };
 
-        rcc.ahbpcenr.modify(|_, w| w.usbpd().set_bit()); // enable USBPD
-
-        // PC14, PC15
-        let _cc1 = Input::new(cc1, Pull::None);
-        let _cc2 = Input::new(cc2, Pull::None);
-
-        // PD 引脚 PC14/PC15 高阈值输入模式
-        // PD 收发器 PHY 上拉限幅配置位: USBPD_PHY_V33
-        afio.ctlr
-            .modify(|_, w| w.usbpd_in_hvt().set_bit().usbpd_phy_v33().set_bit());
-
-        usbpd.config.write(|w| w.pd_dma_en().set_bit());
-        usbpd.status.write(|w| {
-            w.buf_err()
-                .set_bit()
-                .if_rx_bit()
-                .set_bit()
-                .if_rx_byte()
-                .set_bit()
-                .if_rx_act()
-                .set_bit()
-                .if_rx_reset()
-                .set_bit()
-                .if_tx_end()
-                .set_bit()
-        }); // write 1 to clear
-
-        let mut this = Self { _priv: () };
-        this.reset_phy();
-        this.set_rx_mode();
-
-        this
+    if rb.config.read().cc_sel().is_cc1() {
+        rb.port_cc1.modify(|_, w| w.cc_lve().set_bit());
+    } else {
+        rb.port_cc2.modify(|_, w| w.cc_lve().set_bit());
     }
+    const UPD_TMR_TX_48M: u16 = 80 - 1;
 
-    pub fn reset_phy(&mut self) {
-        let usbpd = unsafe { &*pac::USBPD::PTR };
+    rb.bmc_clk_cnt.write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
 
-        usbpd.port_cc1.write(|w| w.cc_ce().v0_66().cc_pd().set_bit());
-        usbpd.port_cc2.write(|w| w.cc_ce().v0_66().cc_pd().set_bit());
-    }
+    rb.dma.write(|w| unsafe { w.bits(0) });
 
-    pub fn set_rx_mode(&self) {
-        let usbpd = unsafe { &*pac::USBPD::PTR };
+    rb.tx_sel.write(|w| unsafe { w.bits(sop) });
 
-        usbpd.config.modify(|_, w| w.pd_all_clr().set_bit());
-        usbpd.config.modify(|_, w| w.pd_all_clr().clear_bit());
-        usbpd
-            .config
-            .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().pd_dma_en().set_bit());
+    rb.bmc_tx_sz.write(|w| unsafe { w.bmc_tx_sz().bits(0) }); // len = 0
+    rb.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx mode
 
-        usbpd
-            .dma
-            .write(|w| unsafe { w.bits(((PD_RX_BUF.as_mut_ptr() as u32) & 0xFFFF) as u16) });
+    rb.status.write(|w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
+                                                        // rb.config.modify(|_, w| w.pd_all_clr().set_bit());
+                                                        //rb.config.modify(|_, w| w.pd_all_clr().clear_bit());
 
-        usbpd.control.modify(|_, w| w.pd_tx_en().clear_bit()); // rx_en
+    rb.control.modify(|_, w| w.bmc_start().set_bit());
 
-        // #define UPD_TMR_TX_48M    (80-1)                                             /* timer value for USB PD BMC transmittal @Fsys=48MHz */
-        // #define UPD_TMR_RX_48M    (120-1)                                            /* timer value for USB PD BMC receiving @Fsys=48MHz */
-        // #define UPD_TMR_TX_24M    (40-1)                                             /* timer value for USB PD BMC transmittal @Fsys=24MHz */
-        // #define UPD_TMR_RX_24M    (60-1)                                             /* timer value for USB PD BMC receiving @Fsys=24MHz */
-        // #define UPD_TMR_TX_12M    (20-1)                                             /* timer value for USB PD BMC transmittal @Fsys=12MHz */
-        // #define UPD_TMR_RX_12M    (30-1)                                             /* timer value for USB PD BMC receiving @Fsys=12MHz */
-        usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(120 - 1) });
-        usbpd.control.modify(|_, w| w.bmc_start().set_bit());
-
-        unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
-    }
-
-    /// Detect CC connection
-    pub fn detect(&mut self) -> bool {
-        let usbpd = unsafe { &*pac::USBPD::PTR };
-
-        let mut cc1 = false;
-        let mut cc2 = false;
-
-        usbpd.port_cc1.modify(|_, w| w.cc_pd().set_bit());
-        usbpd.port_cc2.modify(|_, w| w.cc_pd().set_bit());
-
-        usbpd.port_cc1.modify(|_, w| w.cc_ce().v0_22());
-        Delay.delay_us(2);
-        // test if > 0.22V
-        if usbpd.port_cc1.read().pa_cc_ai().bit_is_set() {
-            // cc1 is connected
-            usbpd.config.modify(|_, w| w.cc_sel().cc1());
-            println!("CC1 is connected");
-            cc1 = true;
-        }
-        usbpd.port_cc1.modify(|_, w| w.cc_ce().v0_66());
-
-        usbpd.port_cc2.modify(|_, w| w.cc_ce().v0_22());
-        Delay.delay_us(2);
-        if usbpd.port_cc2.read().pa_cc_ai().bit_is_set() {
-            // cc2 is connected
-            usbpd.config.modify(|_, w| w.cc_sel().cc2());
-            println!("CC2 is connected");
-            if !cc1 {
-                // Huawei A to C cable has two pull-up resistors
-                cc2 = true;
-            }
-        }
-        usbpd.port_cc2.modify(|_, w| w.cc_ce().v0_66());
-
-        cc1 || cc2
-    }
-
-    pub fn send_empty(&mut self, sop: u8) {
-        let rb = unsafe { &*pac::USBPD::PTR };
-
-        if rb.config.read().cc_sel().is_cc1() {
-            rb.port_cc1.modify(|_, w| w.cc_lve().set_bit());
-        } else {
-            rb.port_cc2.modify(|_, w| w.cc_lve().set_bit());
-        }
-        const UPD_TMR_TX_48M: u16 = 80 - 1;
-
-        rb.bmc_clk_cnt.write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
-
-        rb.dma.write(|w| unsafe { w.bits(0) });
-
-        rb.tx_sel.write(|w| unsafe { w.bits(sop) });
-
-        rb.bmc_tx_sz.write(|w| unsafe { w.bmc_tx_sz().bits(0) }); // len = 0
-        rb.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx mode
-
-        rb.status.write(|w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
-                                                            // rb.config.modify(|_, w| w.pd_all_clr().set_bit());
-                                                            //rb.config.modify(|_, w| w.pd_all_clr().clear_bit());
-
-        rb.control.modify(|_, w| w.bmc_start().set_bit());
-
-        rb.config.modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
-    }
-
-    pub fn send(&mut self, buf: &[u8], sop: u8) {
-        let rb = unsafe { &*pac::USBPD::PTR };
-
-        if rb.config.read().cc_sel().is_cc1() {
-            rb.port_cc1.modify(|_, w| w.cc_lve().set_bit());
-        } else {
-            rb.port_cc2.modify(|_, w| w.cc_lve().set_bit());
-        }
-        const UPD_TMR_TX_48M: u16 = 80 - 1;
-
-        rb.bmc_clk_cnt.write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
-
-        let dma_addr = buf.as_ptr() as u32 & 0xFFFF;
-
-        rb.dma.write(|w| unsafe { w.bits(dma_addr as u16) });
-
-        rb.tx_sel.write(|w| unsafe { w.bits(sop) });
-
-        rb.bmc_tx_sz.write(|w| unsafe { w.bmc_tx_sz().bits(buf.len() as _) });
-        rb.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx mode
-
-        //rb.status.modify(|_, w| unsafe { w.bits(0) }); // clear bmc aux status
-        rb.status.write(|w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
-                                                            //rb.config.modify(|_, w| w.pd_all_clr().set_bit());
-                                                            //rb.config.modify(|_, w| w.pd_all_clr().clear_bit());
-
-        rb.control.modify(|_, w| w.bmc_start().set_bit());
-
-        rb.config.modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
-    }
-
-    unsafe fn on_interrupt(&self) {
-        let usbpd = &*pac::USBPD::PTR;
-
-        println!("in USBPD irq");
-
-        let status = usbpd.status.read();
-
-        // 接收完成中断标志
-        if status.if_rx_act().bit_is_set() {
-            usbpd.status.modify(|_, w| w.if_rx_act().set_bit()); // clear IF
-
-            if status.bmc_aux().bits() == PD_SOP0 {
-                let len = usbpd.bmc_byte_cnt.read().bits();
-                if len >= 6 {
-                    // If GOODCRC, do not answer and ignore this reception
-                    if len != 6 || PD_RX_BUF[0] & 0x1F != defs::DEF_TYPE_GOODCRC {
-                        Delay.delay_us(30); // delay 30us answer GoodCRC
-
-                        PD_TX_BUF[0] = 0x41; // 0b10_00001
-                        PD_TX_BUF[1] = PD_RX_BUF[1] & 0x0E;
-                        usbpd.config.modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
-
-                        pd_phy_send_pack(&PD_TX_BUF[..2], TX_SEL_SOP0);
-                    }
-                    println!("=> {:?}", &PD_RX_BUF[..len as usize]);
-                    print_src_cap(&PD_RX_BUF[..len as usize]);
-                }
-            }
-        }
-        if status.if_tx_end().bit_is_set() {
-            usbpd.port_cc1.modify(|_, w| w.cc_lve().clear_bit());
-            usbpd.port_cc2.modify(|_, w| w.cc_lve().clear_bit());
-
-            //  qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
-
-            self.set_rx_mode();
-            println!("tx end");
-        }
-
-        usbpd.status.modify(|r, w| unsafe { w.bits(r.bits()) });
-    }
+    rb.config.modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
 }

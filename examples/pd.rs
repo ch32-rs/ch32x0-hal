@@ -3,6 +3,7 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+use aligned::Aligned;
 use bitfield::bitfield;
 use ch32x0::ch32x035::Interrupt;
 use ch32x0_hal as hal;
@@ -140,8 +141,8 @@ async fn blink(pin: AnyPin) {
     }
 }
 
-static mut PD_RX_BUF: [u8; 34] = [0; 34];
-static mut PD_TX_BUF: [u8; 34] = [0; 34];
+static mut PD_RX_BUF: Aligned<aligned::A4, [u8; 34]> = Aligned([0; 34]);
+static mut PD_TX_BUF: Aligned<aligned::A4, [u8; 34]> = Aligned([0; 34]);
 
 pub fn parse_package(raw: &[u8]) -> Option<(Header, &[u32])> {
     todo!();
@@ -209,8 +210,8 @@ pub fn print_src_cap(raw: &[u8]) {
             if power_data >> 30 == 0b00 {
                 let power_data = FixedPowerDataObject(power_data);
                 println!(
-                    "  Fixed Supply: {}V {}mA",
-                    power_data.voltage_50mv() * 50 / 1000,
+                    "  Fixed Supply: {}mV {}mA",
+                    power_data.voltage_50mv() * 50,
                     power_data.max_current_10ma() * 10
                 );
             } else if power_data >> 28 == 0b1100 {
@@ -218,9 +219,9 @@ pub fn print_src_cap(raw: &[u8]) {
                 // SPR Programmable Power Supply
                 let power_data = AugmentedPowerDataObject(power_data);
                 println!(
-                    "  Augmented Supply: {}V-{}V {}mA",
-                    power_data.min_voltage_100mv() * 100 / 1000,
-                    power_data.max_voltage_100mv() * 100 / 1000,
+                    "  SPR PPS Augmented Supply: {}mV-{}mV {}mA",
+                    power_data.min_voltage_100mv() * 100,
+                    power_data.max_voltage_100mv() * 100,
                     power_data.max_current_50ma() * 50
                 );
             }
@@ -236,6 +237,7 @@ unsafe extern "C" fn USBPD() {
 
     let status = usbpd.status.read();
 
+//    println!("status 0x{:02x}", status.bits());
     // 接收完成中断标志
     if status.if_rx_act().bit_is_set() {
         usbpd.status.modify(|_, w| w.if_rx_act().set_bit()); // clear IF
@@ -266,7 +268,9 @@ unsafe extern "C" fn USBPD() {
 
         println!("tx end");
     }
-
+    if status.buf_err().bit() {
+        println!("buf err");
+    }
     usbpd.status.modify(|r, w| unsafe { w.bits(r.bits()) });
 }
 
@@ -467,7 +471,7 @@ fn pd_rx_mode() {
         .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().pd_dma_en().set_bit());
 
     //    println!("=> {:08x}", usbpd.config.read().bits());
-    println!("dma {:p}", unsafe { PD_RX_BUF.as_mut_ptr() });
+    // println!("dma {:p}", unsafe { PD_RX_BUF.as_mut_ptr() });
     usbpd
         .dma
         .write(|w| unsafe { w.bits(((PD_RX_BUF.as_mut_ptr() as u32) & 0xFFFF) as u16) });
@@ -480,10 +484,11 @@ fn pd_rx_mode() {
     // #define UPD_TMR_RX_24M    (60-1)                                             /* timer value for USB PD BMC receiving @Fsys=24MHz */
     // #define UPD_TMR_TX_12M    (20-1)                                             /* timer value for USB PD BMC transmittal @Fsys=12MHz */
     // #define UPD_TMR_RX_12M    (30-1)                                             /* timer value for USB PD BMC receiving @Fsys=12MHz */
-    usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(120 - 1) });
+    const UPD_TMR_RX_48M: u16 = 120 - 1;
+    usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(UPD_TMR_RX_48M) });
     usbpd.control.modify(|_, w| w.bmc_start().set_bit());
 
-    unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8)};
+    unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
 }
 
 fn pd_phy_send_pack(buf: &[u8], sop: u8) {

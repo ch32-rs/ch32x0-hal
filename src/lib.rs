@@ -22,7 +22,7 @@ pub mod signature;
 pub mod spi;
 pub mod usart;
 
-mod critical_section;
+mod critical_section_impl;
 #[cfg(feature = "embassy")]
 pub mod embassy;
 

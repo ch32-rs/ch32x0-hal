@@ -246,14 +246,7 @@ impl_exti!(EXTI23, 23);
 
 /// safety: must be called only once
 pub(crate) unsafe fn init(_cs: critical_section::CriticalSection) {
-    //    use crate::interrupt::typelevel::Interrupt;
     use crate::pac::Interrupt;
-
-    // Enable interrupt
-    //    let pfic = &*pac::PFIC::PTR;
-    //  pfic.ienr1.write(|w| w.bits(1 << Interrupt::EXTI7_0 as u16));
-    //pfic.ienr2.write(|w| w.bits(1 << (Interrupt::EXTI15_8 as u16 - 32)));
-    //pfic.ienr2.write(|w| w.bits(1 << (Interrupt::EXTI25_16 as u16 - 32)));
 
     qingke::pfic::enable_interrupt(Interrupt::EXTI7_0 as u8);
     qingke::pfic::enable_interrupt(Interrupt::EXTI15_8 as u8);

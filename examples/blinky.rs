@@ -3,9 +3,8 @@
 #![feature(type_alias_impl_trait)]
 
 use embassy_executor::Spawner;
-use embassy_time::{Delay, Duration, Instant, Timer};
-use hal::gpio::{AnyPin, Input, Level, Output, Pin, Pull};
-use hal::{peripherals, println};
+use embassy_time::{Duration, Timer};
+use hal::gpio::{AnyPin, Level, Output, Pin};
 use {ch32x0_hal as hal, panic_halt as _};
 
 #[embassy_executor::task]
@@ -30,6 +29,6 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(blink(p.PA4.degrade())).unwrap();
 
     loop {
-        Timer::after(Duration::from_millis(1000)).await;
+        Timer::after_millis(1000).await;
     }
 }

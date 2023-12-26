@@ -283,7 +283,7 @@ unsafe extern "C" fn USBPD() {
         usbpd.port_cc1.modify(|_, w| w.cc_lve().clear_bit());
         usbpd.port_cc2.modify(|_, w| w.cc_lve().clear_bit());
 
-      //  pd_rx_mode();
+        //  pd_rx_mode();
         //  qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
         println!("tx end");
@@ -382,14 +382,12 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after(Duration::from_millis(2000)).await;
     pd_rx_mode();
 
-
     let mut i = 0;
 
     loop {
         i += 1;
         Timer::after(Duration::from_millis(5000)).await;
         println!("tick");
-
 
         led.toggle();
 
@@ -449,7 +447,7 @@ fn pd_rx_mode() {
     usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(120 - 1) });
     usbpd.control.modify(|_, w| w.bmc_start().set_bit());
 
-    qingke::pfic::enable_interrupt(Interrupt::USBPD as u8);
+    unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
 }
 
 fn pd_phy_send_pack(buf: &[u8], sop: u8) {
@@ -475,8 +473,8 @@ fn pd_phy_send_pack(buf: &[u8], sop: u8) {
     usbpd.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx
 
     usbpd.status.modify(|_, w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
-                                                      //    usbpd.config.modify(|_, w| w.pd_all_clr().set_bit());
-                                                      //  usbpd.config.modify(|_, w| w.pd_all_clr().clear_bit());
+                                                               //    usbpd.config.modify(|_, w| w.pd_all_clr().set_bit());
+                                                               //  usbpd.config.modify(|_, w| w.pd_all_clr().clear_bit());
 
     usbpd.control.modify(|_, w| w.bmc_start().set_bit());
 
@@ -558,7 +556,7 @@ impl UsbPdSink {
         usbpd.bmc_clk_cnt.write(|w| unsafe { w.bmc_clk_cnt().bits(120 - 1) });
         usbpd.control.modify(|_, w| w.bmc_start().set_bit());
 
-        qingke::pfic::enable_interrupt(Interrupt::USBPD as u8);
+        unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
     }
 
     /// Detect CC connection
@@ -617,9 +615,9 @@ impl UsbPdSink {
         rb.bmc_tx_sz.write(|w| unsafe { w.bmc_tx_sz().bits(0) }); // len = 0
         rb.control.modify(|_, w| w.pd_tx_en().set_bit()); // tx mode
 
-         rb.status.write(|w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
-       // rb.config.modify(|_, w| w.pd_all_clr().set_bit());
-        //rb.config.modify(|_, w| w.pd_all_clr().clear_bit());
+        rb.status.write(|w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
+                                                            // rb.config.modify(|_, w| w.pd_all_clr().set_bit());
+                                                            //rb.config.modify(|_, w| w.pd_all_clr().clear_bit());
 
         rb.control.modify(|_, w| w.bmc_start().set_bit());
 

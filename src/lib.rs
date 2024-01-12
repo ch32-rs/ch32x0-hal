@@ -1,7 +1,6 @@
 #![no_std]
 
 pub use ch32x0::ch32x035 as pac;
-pub use pac::interrupt;
 
 // pub mod rt;
 
@@ -13,6 +12,7 @@ pub mod delay;
 mod peripheral;
 pub use peripheral::*;
 pub use peripherals::Peripherals;
+pub mod interrupt;
 pub mod peripherals;
 
 pub mod exti;

@@ -4,10 +4,8 @@ use crate::pac;
 
 const HSI_FREQUENCY: Hertz = Hertz::from_raw(48_000_000);
 
-// HPRE = 0b0101
+// Power on default: HPRE = 0b0101 = Div6
 const DEFAULT_FREQUENCY: Hertz = Hertz::from_raw(8_000_000);
-
-pub const AHB_PRESCALER_TABLE: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8];
 
 static mut CLOCKS: Clocks = Clocks {
     // Power on default
@@ -18,6 +16,7 @@ static mut CLOCKS: Clocks = Clocks {
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Clocks {
     pub sysclk: Hertz,
+    /// Clock of AHB
     pub hclk: Hertz,
 }
 

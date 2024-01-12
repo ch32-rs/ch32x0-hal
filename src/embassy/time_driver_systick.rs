@@ -155,7 +155,7 @@ impl Driver for SystickDriver {
                 return false;
             }
 
-            let safe_timestamp = (timestamp.saturating_add(1)) * (self.period.load(Ordering::Relaxed) as u64);
+            let safe_timestamp = timestamp.saturating_add(1) * (self.period.load(Ordering::Relaxed) as u64);
 
             rb.cmp().write(|w| unsafe { w.bits(safe_timestamp) });
             rb.ctlr().modify(|_, w| w.stie().set_bit());

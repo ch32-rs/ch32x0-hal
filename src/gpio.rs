@@ -400,11 +400,44 @@ pub(crate) mod sealed {
             }
         }
 
-        /*
+        /// Only one type, alternate function + push pull
         #[inline]
-        fn set_as_af(&self, af_num: u8, af_type: AFType) {
-            self.set_as_af_pull(af_num, af_type, Pull::None);
+        fn set_as_af_output(&self) {
+            let pin = self._pin() as usize;
+            let block = self.block();
+
+            // 复用功能推挽输出模式(I2C 自动开漏)
+            let cnf_mode = 0b10_01;
+            let shift = pin * 4 % 32;
+
+            match pin / 8 {
+                0 => {
+                    block.cfglr().modify(|r, w| unsafe {
+                        let mut bits = r.bits();
+                        bits &= !(0b1111 << shift);
+                        bits |= cnf_mode << shift;
+                        w.bits(bits)
+                    });
+                }
+                1 => {
+                    block.cfghr().modify(|r, w| unsafe {
+                        let mut bits = r.bits();
+                        bits &= !(0b1111 << shift);
+                        bits |= cnf_mode << shift;
+                        w.bits(bits)
+                    });
+                }
+                _ => {
+                    block.cfgxr().modify(|r, w| unsafe {
+                        let mut bits = r.bits();
+                        bits &= !(0b1111 << shift);
+                        bits |= cnf_mode << shift;
+                        w.bits(bits)
+                    });
+                }
+            }
         }
+        /*
 
         #[inline]
         fn set_as_af_pull(&self, af_num: u8, af_type: AFType, pull: Pull) {
@@ -528,6 +561,7 @@ macro_rules! foreach_pin {
             $(($pat) => $code;)*
             ($_:tt) => {}
         }
+        __foreach_pin_inner!((PA0,GPIOA,0,0, EXTI0));
         __foreach_pin_inner!((PA1,GPIOA,0,1, EXTI1));
         __foreach_pin_inner!((PA2,GPIOA,0,2, EXTI2));
         __foreach_pin_inner!((PA3,GPIOA,0,3, EXTI3));

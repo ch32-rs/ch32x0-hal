@@ -74,7 +74,7 @@ impl<'d, T: Pin> Flex<'d, T> {
 
     #[inline]
     pub fn is_low(&self) -> bool {
-        self.pin.block().indr.read().bits() & (1 << self.pin.pin()) == 0
+        self.pin.block().indr().read().bits() & (1 << self.pin.pin()) == 0
     }
 
     #[inline]
@@ -90,7 +90,7 @@ impl<'d, T: Pin> Flex<'d, T> {
     /// Is the output pin set as low?
     #[inline]
     pub fn is_set_low(&self) -> bool {
-        self.pin.block().outdr.read().bits() & (1 << self.pin.pin()) == 0
+        self.pin.block().outdr().read().bits() & (1 << self.pin.pin()) == 0
     }
 
     /// What level output is set to
@@ -305,9 +305,9 @@ pub(crate) mod sealed {
         fn set_high(&self) {
             let n = self._pin();
             if n < 16 {
-                self.block().bshr.write(|w| unsafe { w.bits(1 << n) });
+                self.block().bshr().write(|w| unsafe { w.bits(1 << n) });
             } else {
-                self.block().bsxr.write(|w| unsafe { w.bits(1 << (n - 16)) });
+                self.block().bsxr().write(|w| unsafe { w.bits(1 << (n - 16)) });
             }
         }
 
@@ -316,9 +316,9 @@ pub(crate) mod sealed {
         fn set_low(&self) {
             let n = self._pin();
             if n < 16 {
-                self.block().bshr.write(|w| unsafe { w.bits(1 << (n + 16)) });
+                self.block().bshr().write(|w| unsafe { w.bits(1 << (n + 16)) });
             } else {
-                self.block().bsxr.write(|w| unsafe { w.bits(1 << (n - 16 + 16)) });
+                self.block().bsxr().write(|w| unsafe { w.bits(1 << (n - 16 + 16)) });
             }
         }
 
@@ -332,7 +332,7 @@ pub(crate) mod sealed {
 
             match pin / 8 {
                 0 => {
-                    block.cfglr.modify(|r, w| unsafe {
+                    block.cfglr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -340,7 +340,7 @@ pub(crate) mod sealed {
                     });
                 }
                 1 => {
-                    block.cfghr.modify(|r, w| unsafe {
+                    block.cfghr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -348,7 +348,7 @@ pub(crate) mod sealed {
                     });
                 }
                 _ => {
-                    block.cfgxr.modify(|r, w| unsafe {
+                    block.cfgxr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -368,7 +368,7 @@ pub(crate) mod sealed {
 
             match pin / 8 {
                 0 => {
-                    block.cfglr.modify(|r, w| unsafe {
+                    block.cfglr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -376,7 +376,7 @@ pub(crate) mod sealed {
                     });
                 }
                 1 => {
-                    block.cfghr.modify(|r, w| unsafe {
+                    block.cfghr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -384,7 +384,7 @@ pub(crate) mod sealed {
                     });
                 }
                 _ => {
-                    block.cfgxr.modify(|r, w| unsafe {
+                    block.cfgxr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -394,8 +394,8 @@ pub(crate) mod sealed {
             }
 
             match pull {
-                Pull::Up => block.outdr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
-                Pull::Down => block.outdr.modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
+                Pull::Up => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
+                Pull::Down => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
                 _ => {}
             }
         }
@@ -432,7 +432,7 @@ pub(crate) mod sealed {
 
             match pin / 8 {
                 0 => {
-                    block.cfglr.modify(|r, w| unsafe {
+                    block.cfglr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -440,7 +440,7 @@ pub(crate) mod sealed {
                     });
                 }
                 1 => {
-                    block.cfghr.modify(|r, w| unsafe {
+                    block.cfghr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -448,7 +448,7 @@ pub(crate) mod sealed {
                     });
                 }
                 _ => {
-                    block.cfgxr.modify(|r, w| unsafe {
+                    block.cfgxr().modify(|r, w| unsafe {
                         let mut bits = r.bits();
                         bits &= !(0b1111 << shift);
                         bits |= cnf_mode << shift;
@@ -620,7 +620,7 @@ foreach_pin!(
 pub(crate) fn init() {
     let rcc = unsafe { &*pac::RCC::PTR };
 
-    rcc.apb2pcenr.modify(|_, w| {
+    rcc.apb2pcenr().modify(|_, w| {
         w.afioen()
             .set_bit()
             .iopaen()
@@ -632,27 +632,27 @@ pub(crate) fn init() {
     });
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::ErrorType for Input<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::ErrorType for Input<'d, T> {
     type Error = Infallible;
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::InputPin for Input<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::InputPin for Input<'d, T> {
     #[inline]
-    fn is_high(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_high())
+    fn is_high(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_high())
     }
 
     #[inline]
-    fn is_low(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_low())
+    fn is_low(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_low())
     }
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::ErrorType for Output<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::ErrorType for Output<'d, T> {
     type Error = Infallible;
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::OutputPin for Output<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::OutputPin for Output<'d, T> {
     #[inline]
     fn set_high(&mut self) -> Result<(), Self::Error> {
         Ok(self.set_high())
@@ -664,39 +664,32 @@ impl<'d, T: Pin> embedded_hal_1::digital::OutputPin for Output<'d, T> {
     }
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::StatefulOutputPin for Output<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::StatefulOutputPin for Output<'d, T> {
     #[inline]
-    fn is_set_high(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_set_high())
+    fn is_set_high(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_set_high())
     }
 
     /// Is the output pin set as low?
     #[inline]
-    fn is_set_low(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_set_low())
+    fn is_set_low(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_set_low())
     }
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::ToggleableOutputPin for Output<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::InputPin for Flex<'d, T> {
     #[inline]
-    fn toggle(&mut self) -> Result<(), Self::Error> {
-        Ok(self.toggle())
+    fn is_high(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_high())
+    }
+
+    #[inline]
+    fn is_low(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_low())
     }
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::InputPin for Flex<'d, T> {
-    #[inline]
-    fn is_high(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_high())
-    }
-
-    #[inline]
-    fn is_low(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_low())
-    }
-}
-
-impl<'d, T: Pin> embedded_hal_1::digital::OutputPin for Flex<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::OutputPin for Flex<'d, T> {
     #[inline]
     fn set_high(&mut self) -> Result<(), Self::Error> {
         Ok(self.set_high())
@@ -708,26 +701,19 @@ impl<'d, T: Pin> embedded_hal_1::digital::OutputPin for Flex<'d, T> {
     }
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::ToggleableOutputPin for Flex<'d, T> {
-    #[inline]
-    fn toggle(&mut self) -> Result<(), Self::Error> {
-        Ok(self.toggle())
-    }
-}
-
-impl<'d, T: Pin> embedded_hal_1::digital::ErrorType for Flex<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::ErrorType for Flex<'d, T> {
     type Error = Infallible;
 }
 
-impl<'d, T: Pin> embedded_hal_1::digital::StatefulOutputPin for Flex<'d, T> {
+impl<'d, T: Pin> embedded_hal::digital::StatefulOutputPin for Flex<'d, T> {
     #[inline]
-    fn is_set_high(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_set_high())
+    fn is_set_high(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_set_high())
     }
 
     /// Is the output pin set as low?
     #[inline]
-    fn is_set_low(&self) -> Result<bool, Self::Error> {
-        Ok(self.is_set_low())
+    fn is_set_low(&mut self) -> Result<bool, Self::Error> {
+        Ok((*self).is_set_low())
     }
 }

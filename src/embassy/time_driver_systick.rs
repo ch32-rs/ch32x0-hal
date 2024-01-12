@@ -5,7 +5,8 @@ use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use core::{mem, ptr};
 
 use critical_section::{CriticalSection, Mutex};
-use embassy_time::driver::{AlarmHandle, Driver};
+use embassy_time_driver::{AlarmHandle, Driver};
+use qingke::interrupt::Priority;
 
 use crate::pac;
 use crate::pac::Interrupt;
@@ -40,7 +41,7 @@ pub struct SystickDriver {
 }
 
 const ALARM_STATE_NEW: AlarmState = AlarmState::new();
-embassy_time::time_driver_impl!(static DRIVER: SystickDriver = SystickDriver {
+embassy_time_driver::time_driver_impl!(static DRIVER: SystickDriver = SystickDriver {
     period: AtomicU32::new(1), // avoid div by zero
     alarm_count: AtomicU8::new(0),
     alarms: Mutex::new([ALARM_STATE_NEW; ALARM_COUNT]),
@@ -52,16 +53,17 @@ impl SystickDriver {
         let hclk = crate::rcc::clocks().hclk.to_Hz() as u64;
 
         let cnt_per_second = hclk / 8;
-        let cnt_per_tick = cnt_per_second / embassy_time::TICK_HZ;
+        let cnt_per_tick = cnt_per_second / embassy_time_driver::TICK_HZ;
 
         self.period.store(cnt_per_tick as u32, Ordering::Relaxed);
 
         // UNDOCUMENTED:  Avoid initial interrupt
-        rb.cmp.write(|w| unsafe { w.bits(u64::MAX - 1) });
+        rb.cmp().write(|w| unsafe { w.bits(u64::MAX - 1) });
         critical_section::with(|_| {
-            rb.sr.write(|w| w.cntif().bit(false)); // clear
-                                                   // Configration: Upcount, No reload, HCLK/8 as clock source
-            rb.ctlr.modify(|_, w| {
+            rb.sr().write(|w| w.cntif().bit(false)); // clear
+
+            // Configration: Upcount, No reload, HCLK/8 as clock source
+            rb.ctlr().modify(|_, w| {
                 w.init()
                     .set_bit()
                     .mode()
@@ -78,8 +80,8 @@ impl SystickDriver {
 
     fn on_interrupt(&self) {
         let rb = unsafe { &*pac::SYSTICK::PTR };
-        rb.ctlr.modify(|_, w| w.stie().clear_bit()); // disable interrupt
-        rb.sr.write(|w| w.cntif().bit(false)); // clear IF
+        rb.ctlr().modify(|_, w| w.stie().clear_bit()); // disable interrupt
+        rb.sr().write(|w| w.cntif().bit(false)); // clear IF
 
         critical_section::with(|cs| {
             self.trigger_alarm(cs);
@@ -109,7 +111,7 @@ impl SystickDriver {
 impl Driver for SystickDriver {
     fn now(&self) -> u64 {
         let rb = unsafe { &*pac::SYSTICK::PTR };
-        rb.cnt.read().bits() / (self.period.load(Ordering::Relaxed) as u64)
+        rb.cnt().read().bits() / (self.period.load(Ordering::Relaxed) as u64)
     }
     unsafe fn allocate_alarm(&self) -> Option<AlarmHandle> {
         let id = self.alarm_count.fetch_update(Ordering::AcqRel, Ordering::Acquire, |x| {
@@ -146,17 +148,17 @@ impl Driver for SystickDriver {
             if timestamp <= t {
                 // If alarm timestamp has passed the alarm will not fire.
                 // Disarm the alarm and return `false` to indicate that.
-                rb.ctlr.modify(|_, w| w.stie().clear_bit());
+                rb.ctlr().modify(|_, w| w.stie().clear_bit());
 
                 alarm.timestamp.set(u64::MAX);
 
                 return false;
             }
 
-            let safe_timestamp = (timestamp + 1) * (self.period.load(Ordering::Relaxed) as u64);
+            let safe_timestamp = (timestamp.saturating_add(1)) * (self.period.load(Ordering::Relaxed) as u64);
 
-            rb.cmp.write(|w| unsafe { w.bits(safe_timestamp) });
-            rb.ctlr.modify(|_, w| w.stie().set_bit());
+            rb.cmp().write(|w| unsafe { w.bits(safe_timestamp) });
+            rb.ctlr().modify(|_, w| w.stie().set_bit());
 
             true
         })
@@ -170,9 +172,11 @@ extern "C" fn SysTick() {
 
 pub(crate) fn init() {
     DRIVER.init();
+    use qingke_rt::CoreInterrupt;
 
     // enable interrupt
     unsafe {
-        qingke::pfic::enable_interrupt(Interrupt::SYS_TICK as u8);
+        qingke::pfic::set_priority(CoreInterrupt::SysTick as u8 as u8, Priority::P15 as _);
+        qingke::pfic::enable_interrupt(CoreInterrupt::SysTick as u8);
     }
 }

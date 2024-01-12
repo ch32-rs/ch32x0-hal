@@ -5,11 +5,11 @@
 
 use core::arch::asm;
 
-use embedded_hal_1::delay::DelayNs;
+use embedded_hal::delay::DelayNs;
 use hal::println;
 use {ch32x0_hal as hal, panic_halt as _};
 
-#[riscv_rt::entry]
+#[qingke_rt::entry]
 fn main() -> ! {
     hal::debug::SDIPrint::enable();
 

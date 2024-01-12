@@ -3,7 +3,7 @@
 pub use ch32x0::ch32x035 as pac;
 pub use pac::interrupt;
 
-pub mod rt;
+// pub mod rt;
 
 pub mod rcc;
 
@@ -22,7 +22,6 @@ pub mod signature;
 pub mod spi;
 pub mod usart;
 
-mod critical_section_impl;
 #[cfg(feature = "embassy")]
 pub mod embassy;
 

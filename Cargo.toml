@@ -6,30 +6,30 @@ edition = "2021"
 [dependencies]
 ch32x0 = { version = "0.1.6", features = [
     "ch32x035",
+    "rt",
 ], path = "../ch32-rs-nightlies/ch32x0" }
 fugit = "0.3.7"
 
-riscv-rt = { version = "0.11.0" }
-# features = ["single-hart"]
-
-qingke = { version = "0.1.5", path = "../qingke" }
-# ch32v-rt = "0.0.2"
-embedded-hal-02 = { package = "embedded-hal", version = "0.2.7", features = [
-    "unproven",
+qingke = { version = "0.1.5", path = "../qingke", features = [
+    "critical-section-impl",
 ] }
-embedded-hal-1 = { version = "=1.0.0-rc.2", package = "embedded-hal" }
+qingke-rt = { version = "0.1.5", path = "../qingke/qingke-rt", features = [
+    "highcode",
+] }
+embedded-hal = { version = "1.0.0", package = "embedded-hal" }
 critical-section = { version = "1.1.2", features = ["restore-state-u8"] }
 defmt = { version = "0.3.5", optional = true }
-embassy-time = { version = "0.2.0", optional = true, features = [
-    "tick-hz-32_768",
-] }
 embassy-sync = { version = "0.5.0", optional = true }
 embassy-futures = { version = "0.1.1", optional = true }
 aligned = "0.4.1"
+embassy-time-driver = { version = "0.1.0", features = [
+    "tick-hz-32_768",
+], optional = true }
 
 [dev-dependencies]
+embassy-time = { version = "0.3.0", features = ["tick-hz-32_768"] }
 panic-halt = "0.2.0"
-embassy-executor = { version = "0.4.0", features = [
+embassy-executor = { version = "0.5.0", features = [
     "nightly",
     "integrated-timers",
     "arch-riscv32",
@@ -40,7 +40,7 @@ bitfield = "0.14.0"
 [features]
 default = ["ch32x035f8u6", "embassy"]
 
-embassy = ["embassy-time", "embassy-sync", "embassy-futures"]
+embassy = ["dep:embassy-sync", "dep:embassy-futures", "dep:embassy-time-driver"]
 
 device-selected = []
 

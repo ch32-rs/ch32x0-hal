@@ -17,12 +17,12 @@ static EXTI_WAKERS: [AtomicWaker; EXTI_COUNT] = [NEW_AW; EXTI_COUNT];
 pub unsafe fn on_irq() {
     let exti = unsafe { &*pac::EXTI::PTR };
 
-    let bits = exti.intfr.read().bits();
+    let bits = exti.intfr().read().bits();
 
     // We don't handle or change any EXTI lines above 24.
     let bits = bits & 0x00FFFFFF;
 
-    exti.intenr.modify(|r, w| unsafe { w.bits(r.bits() & !bits) });
+    exti.intenr().modify(|r, w| unsafe { w.bits(r.bits() & !bits) });
 
     // Wake the tasks
     for pin in BitIter(bits) {
@@ -30,7 +30,7 @@ pub unsafe fn on_irq() {
     }
 
     // Clear pending - Clears the EXTI's line pending bits.
-    exti.intfr.write(|w| w.bits(bits)); // write 1 to clear
+    exti.intfr().write(|w| w.bits(bits)); // write 1 to clear
 }
 
 struct BitIter(u32);
@@ -133,20 +133,20 @@ impl<'a> ExtiInputFuture<'a> {
             // AFIO_EXTICRx
             if pin < 16 {
                 let shift = pin * 2;
-                afio.exticr1
+                afio.exticr1()
                     .modify(|r, w| unsafe { w.bits(r.bits() & !(0b11 << shift) | port << shift) });
             } else {
                 let shift = (pin - 16) * 2;
-                afio.exticr2
+                afio.exticr2()
                     .modify(|r, w| unsafe { w.bits(r.bits() & !(0b11 << shift) | port << shift) });
             }
 
             // See-also: 7.4.3
-            exti.intenr.modify(|r, w| unsafe { w.bits(r.bits() | 1 << pin) });
+            exti.intenr().modify(|r, w| unsafe { w.bits(r.bits() | 1 << pin) });
 
-            exti.rtenr
+            exti.rtenr()
                 .modify(|r, w| unsafe { w.bits(r.bits() | (rising as u32) << pin) });
-            exti.ftenr
+            exti.ftenr()
                 .modify(|r, w| unsafe { w.bits(r.bits() | (falling as u32) << pin) });
         });
 
@@ -162,7 +162,7 @@ impl<'a> Drop for ExtiInputFuture<'a> {
         critical_section::with(|_| {
             let pin = self.pin;
             let exti = unsafe { &*pac::EXTI::PTR };
-            exti.intenr.modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) });
+            exti.intenr().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) });
         });
     }
 }
@@ -175,7 +175,7 @@ impl<'a> Future for ExtiInputFuture<'a> {
 
         EXTI_WAKERS[self.pin as usize].register(cx.waker());
 
-        if exti.intenr.read().bits() & (1 << self.pin) == 0 {
+        if exti.intenr().read().bits() & (1 << self.pin) == 0 {
             // intenr cleared by on_irq, then we can assume it is triggered
             Poll::Ready(())
         } else {

@@ -13,7 +13,7 @@ Transmission and reception buffers support DMA transfer
 Supports changing clock phase and polarity
 */
 
-use embedded_hal_1::spi::{Mode, MODE_0};
+use embedded_hal::spi::{Mode, MODE_0};
 use fugit::HertzU32 as Hertz;
 
 use crate::{peripherals, Peripheral};

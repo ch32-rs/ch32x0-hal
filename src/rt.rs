@@ -3,19 +3,18 @@ use core::arch::{asm, global_asm};
 use qingke::register::gintenr;
 use qingke::register::mtvec::{self, TrapMode};
 use qingke::riscv::register::mcause;
-use riscv_rt::TrapFrame;
 
 extern "C" {
-    fn InstructionMisaligned(trap_frame: &TrapFrame);
-    fn InstructionFault(trap_frame: &TrapFrame);
-    fn IllegalInstruction(trap_frame: &TrapFrame);
-    fn Breakpoint(trap_frame: &TrapFrame);
-    fn LoadMisaligned(trap_frame: &TrapFrame);
-    fn LoadFault(trap_frame: &TrapFrame);
-    fn StoreMisaligned(trap_frame: &TrapFrame);
-    fn StoreFault(trap_frame: &TrapFrame);
-    fn UserEnvCall(trap_frame: &TrapFrame);
-    fn MachineEnvCall(trap_frame: &TrapFrame);
+    fn InstructionMisaligned();
+    fn InstructionFault();
+    fn IllegalInstruction();
+    fn Breakpoint();
+    fn LoadMisaligned();
+    fn LoadFault();
+    fn StoreMisaligned();
+    fn StoreFault();
+    fn UserEnvCall();
+    fn MachineEnvCall();
 }
 
 #[doc(hidden)]
@@ -106,70 +105,69 @@ extern "C" {
 
 #[doc(hidden)]
 #[no_mangle]
-pub static __EXTERNAL_INTERRUPTS: [Option<unsafe extern "C" fn()>; 55] =
-    [
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None, // Some(SYS_TICK),
-        None,
-        None,
-        None,
-        Some(WWDG),
-        Some(PVD),
-        Some(FLASH),
-        None,
-        Some(EXTI7_0),
-        Some(AWU),
-        Some(DMA_CHANNEL1),
-        Some(DMA_CHANNEL2),
-        Some(DMA_CHANNEL3),
-        Some(DMA_CHANNEL4),
-        Some(DMA_CHANNEL5),
-        Some(DMA_CHANNEL6),
-        Some(DMA_CHANNEL7),
-        Some(ADC1),
-        Some(I2C1_EV),
-        Some(I2C1_ER),
-        Some(USART1),
-        Some(SPI1),
-        Some(TIM1_BRK),
-        None,
-        Some(TIM1_TRG_COM),
-        Some(TIM1_CC),
-        Some(TIM2_UP_),
-        Some(USART2),
-        Some(EXTI15_8),
-        Some(EXTI25_16),
-        Some(USART3),
-        Some(UART4),
-        Some(DMA_CHANNEL8),
-        Some(USBFS),
-        Some(USBFS_WKUP),
-        Some(PIOC),
-        Some(OPA),
-        Some(USBPD),
-        Some(USBPD_WKUP),
-        Some(TIM2_CC),
-        Some(TIM2_TRG_COM),
-        Some(TIM2_BRK),
-        Some(TIM3),
-    ];
+pub static __EXTERNAL_INTERRUPTS: [Option<unsafe extern "C" fn()>; 55] = [
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None, // Some(SYS_TICK),
+    None,
+    None,
+    None,
+    Some(WWDG),
+    Some(PVD),
+    Some(FLASH),
+    None,
+    Some(EXTI7_0),
+    Some(AWU),
+    Some(DMA_CHANNEL1),
+    Some(DMA_CHANNEL2),
+    Some(DMA_CHANNEL3),
+    Some(DMA_CHANNEL4),
+    Some(DMA_CHANNEL5),
+    Some(DMA_CHANNEL6),
+    Some(DMA_CHANNEL7),
+    Some(ADC1),
+    Some(I2C1_EV),
+    Some(I2C1_ER),
+    Some(USART1),
+    Some(SPI1),
+    Some(TIM1_BRK),
+    None,
+    Some(TIM1_TRG_COM),
+    Some(TIM1_CC),
+    Some(TIM2_UP_),
+    Some(USART2),
+    Some(EXTI15_8),
+    Some(EXTI25_16),
+    Some(USART3),
+    Some(UART4),
+    Some(DMA_CHANNEL8),
+    Some(USBFS),
+    Some(USBFS_WKUP),
+    Some(PIOC),
+    Some(OPA),
+    Some(USBPD),
+    Some(USBPD_WKUP),
+    Some(TIM2_CC),
+    Some(TIM2_TRG_COM),
+    Some(TIM2_BRK),
+    Some(TIM3),
+];
 
 #[link_section = ".trap.rust"]
 #[export_name = "_ch32x0_star_trap_rust"]
 pub unsafe extern "C" fn start_trap_rust(trap_frame: *const TrapFrame) {
     extern "C" {
-        fn ExceptionHandler(trap_frame: &TrapFrame);
+        fn ExceptionHandler();
         fn DefaultHandler();
     }
 

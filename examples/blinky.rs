@@ -5,6 +5,7 @@
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use hal::gpio::{AnyPin, Level, Output, Pin};
+use hal::println;
 use {ch32x0_hal as hal, panic_halt as _};
 
 #[embassy_executor::task]
@@ -13,15 +14,16 @@ async fn blink(pin: AnyPin) {
 
     loop {
         led.set_high();
-        Timer::after(Duration::from_millis(150)).await;
+        Timer::after(Duration::from_millis(1000)).await;
         led.set_low();
-        Timer::after(Duration::from_millis(150)).await;
+        Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
-#[embassy_executor::main(entry = "riscv_rt::entry")]
+#[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(spawner: Spawner) -> ! {
     hal::debug::SDIPrint::enable();
+    // let p = hal::init(Default::default());
     let p = hal::init(Default::default());
     hal::embassy::init();
 
@@ -29,6 +31,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(blink(p.PA4.degrade())).unwrap();
 
     loop {
-        Timer::after_millis(1000).await;
+        Timer::after_millis(2000).await;
+        println!("tick in main");
     }
 }

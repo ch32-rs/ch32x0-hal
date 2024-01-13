@@ -1,19 +1,22 @@
 //! 4 USARTs
+//!
+//! - No split of BasicInstance and FullInstance
 
 /*
-全双工或半双工的同步或异步通信
-NRZ 数据格式
-分数波特率发生器，最高 3Mbps
-可编程数据长度
-可配置的停止位
-支持 LIN，IrDA 编码器，智能卡
-支持 DMA
-多种中断源
+Full-duplex or half-duplex synchronous or asynchronous communication
+NRZ data format
+Fractional baud rate generator, up to 3Mbps
+Programmable data length
+Configurable stop bits
+Supports LIN, IrDA encoder, smart card
+Supports DMA
+Multiple interrupt sources
  */
 
 use core::marker::PhantomData;
 
 use crate::gpio::sealed::Pin;
+use crate::gpio::Pull;
 use crate::{into_ref, pac, peripherals, Peripheral};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -69,12 +72,16 @@ impl Default for Config {
 #[non_exhaustive]
 pub enum Error {
     /// Framing error
+    // FE
     Framing,
     /// Noise error
+    // NE
     Noise,
     /// RX buffer overrun
+    // ORE
     Overrun,
     /// Parity check error
+    // PE
     Parity,
     /// Buffer too large for DMA
     BufferTooLong,
@@ -134,7 +141,7 @@ impl<'d, T: Instance> UartTx<'d, T> {
     pub fn blocking_flush(&mut self) -> Result<(), Error> {
         let rb = T::regs();
 
-        while rb.statr().read().tc().bit_is_clear() {} // wait tx complete
+        while rb.statr().read().txe().bit_is_clear() {} // wait txe
         Ok(())
     }
 }
@@ -143,7 +150,143 @@ pub struct UartRx<'d, T: Instance> {
     phantom: PhantomData<&'d mut T>,
 }
 
-impl<'d, T: Instance> UartRx<'d, T> {}
+impl<'d, T: Instance> UartRx<'d, T> {
+    pub fn new<const REMAP: u8>(
+        peri: impl Peripheral<P = T> + 'd,
+
+        rx: impl Peripheral<P = impl RxPin<T, REMAP>> + 'd,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
+        T::enable_and_reset();
+
+        Self::new_inner(peri, rx, config)
+    }
+
+    fn new_inner<const REMAP: u8>(
+        _peri: impl Peripheral<P = T> + 'd,
+        rx: impl Peripheral<P = impl RxPin<T, REMAP>> + 'd,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
+        into_ref!(_peri, rx);
+
+        rx.set_as_input(Pull::None);
+        T::set_remap(REMAP);
+
+        let rb = T::regs();
+        configure(rb, &config, false, true)?;
+
+        Ok(Self { phantom: PhantomData })
+    }
+
+    /// Read a single u8 if there is one avaliable
+    pub fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
+        let rb = T::regs();
+
+        // while rb.statr().read().rxne().bit_is_clear() {} // wait rxne
+        if rb.statr().read().rxne().bit_is_clear() {
+            Err(nb::Error::WouldBlock)
+        } else {
+            Ok(rb.datar().read().dr().bits() as u8) // FIXME: how to handle 9 bits
+        }
+    }
+
+    pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        let rb = T::regs();
+
+        for c in buffer {
+            while rb.statr().read().rxne().bit_is_clear() {} // wait rxne
+            *c = rb.datar().read().dr().bits() as u8; // FIXME: how to handle 9 bits
+        }
+        Ok(())
+    }
+}
+
+/// Bidirectional UART Driver
+pub struct Uart<'d, T: Instance> {
+    tx: UartTx<'d, T>,
+    rx: UartRx<'d, T>,
+}
+
+impl<'d, T: Instance> Uart<'d, T> {
+    pub fn new<const REMAP: u8>(
+        peri: impl Peripheral<P = T> + 'd,
+        tx: impl Peripheral<P = impl TxPin<T, REMAP>> + 'd,
+        rx: impl Peripheral<P = impl RxPin<T, REMAP>> + 'd,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
+        T::enable_and_reset();
+
+        Self::new_inner(peri, tx, rx, config)
+    }
+
+    pub fn new_half_duplex_on_tx<const REMAP: u8>(
+        _peri: impl Peripheral<P = T> + 'd,
+        tx: impl Peripheral<P = impl TxPin<T, REMAP>> + 'd,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
+        T::enable_and_reset();
+
+        into_ref!(_peri, tx);
+
+        // 推挽复用输出(外加上拉)
+        tx.set_as_af_output();
+        tx.set_pull(Pull::Up);
+        T::set_remap(REMAP);
+
+        let rb = T::regs();
+        configure(rb, &config, true, true)?;
+
+        // TODO: async state
+        // halft duplex conflicts with SCEN、CLKEN and IREN, which is not supported by this driver
+
+        Ok(Self {
+            tx: UartTx { phantom: PhantomData },
+            rx: UartRx { phantom: PhantomData },
+        })
+    }
+
+    fn new_inner<const REMAP: u8>(
+        _peri: impl Peripheral<P = T> + 'd,
+        tx: impl Peripheral<P = impl TxPin<T, REMAP>> + 'd,
+        rx: impl Peripheral<P = impl RxPin<T, REMAP>> + 'd,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
+        into_ref!(_peri, tx, rx);
+
+        tx.set_as_af_output();
+        rx.set_as_input(Pull::None);
+        T::set_remap(REMAP);
+
+        let rb = T::regs();
+        configure(rb, &config, true, true)?;
+
+        Ok(Self {
+            tx: UartTx { phantom: PhantomData },
+            rx: UartRx { phantom: PhantomData },
+        })
+    }
+
+    pub fn split(self) -> (UartTx<'d, T>, UartRx<'d, T>) {
+        (self.tx, self.rx)
+    }
+
+    pub fn blocking_write(&mut self, buffer: &[u8]) -> Result<(), Error> {
+        self.tx.blocking_write(buffer)
+    }
+
+    pub fn blocking_flush(&mut self) -> Result<(), Error> {
+        self.tx.blocking_flush()
+    }
+
+    /// Read a single u8 if there is one avaliable
+    pub fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
+        self.rx.nb_read()
+    }
+
+    pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
+        self.rx.blocking_read(buffer)
+    }
+}
 
 pub(crate) mod sealed {
     // use embassy_sync::waitqueue::AtomicWaker;

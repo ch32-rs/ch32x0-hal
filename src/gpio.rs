@@ -400,6 +400,18 @@ pub(crate) mod sealed {
             }
         }
 
+        #[inline]
+        fn set_pull(&self, pull: Pull) {
+            let pin = self._pin() as usize;
+            let block = self.block();
+
+            match pull {
+                Pull::Up => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
+                Pull::Down => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
+                _ => {}
+            }
+        }
+
         /// Only one type, alternate function + push pull
         #[inline]
         fn set_as_af_output(&self) {

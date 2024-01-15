@@ -154,6 +154,15 @@ impl From<bool> for Level {
     }
 }
 
+impl From<u8> for Level {
+    fn from(val: u8) -> Self {
+        match val {
+            0 => Self::Low,
+            _ => Self::High,
+        }
+    }
+}
+
 impl From<Level> for bool {
     fn from(level: Level) -> bool {
         match level {
@@ -663,8 +672,9 @@ foreach_pin!(
     };
 );
 
-pub(crate) fn init() {
-    let rcc = unsafe { &*pac::RCC::PTR };
+/// Enable the GPIO peripheral clock.
+pub unsafe fn init() {
+    let rcc = &*pac::RCC::PTR;
 
     rcc.apb2pcenr().modify(|_, w| {
         w.afioen()

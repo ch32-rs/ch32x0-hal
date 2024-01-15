@@ -219,6 +219,9 @@ impl<'d, T: Instance> Uart<'d, T> {
         Self::new_inner(peri, tx, rx, config)
     }
 
+    /// Half-duplex
+    ///
+    /// Note: Half duplex requires TX pin to have a pull-up resistor
     pub fn new_half_duplex_on_tx<const REMAP: u8>(
         _peri: impl Peripheral<P = T> + 'd,
         tx: impl Peripheral<P = impl TxPin<T, REMAP>> + 'd,
@@ -230,14 +233,15 @@ impl<'d, T: Instance> Uart<'d, T> {
 
         // 推挽复用输出(外加上拉)
         tx.set_as_af_output();
-        tx.set_pull(Pull::Up);
         T::set_remap(REMAP);
 
         let rb = T::regs();
         configure(rb, &config, true, true)?;
 
-        // TODO: async state
-        // halft duplex conflicts with SCEN、CLKEN and IREN, which is not supported by this driver
+        rb.ctlr3().modify(|_, w| w.hdsel().set_bit()); // half duplex
+
+        rb.statr().modify(|_, w| w.rxne().clear_bit()); // clear rxne
+        let _ = rb.datar().read().dr(); // clear rxne
 
         Ok(Self {
             tx: UartTx { phantom: PhantomData },
@@ -271,11 +275,13 @@ impl<'d, T: Instance> Uart<'d, T> {
     }
 
     pub fn blocking_write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        self.tx.blocking_write(buffer)
-    }
+        let rb = T::regs();
 
-    pub fn blocking_flush(&mut self) -> Result<(), Error> {
-        self.tx.blocking_flush()
+        for &c in buffer {
+            while rb.statr().read().txe().bit_is_clear() {} // wait tx complete
+            rb.datar().write(|w| unsafe { w.dr().bits(c as u16) });
+        }
+        Ok(())
     }
 
     /// Read a single u8 if there is one avaliable

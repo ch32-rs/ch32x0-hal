@@ -32,7 +32,9 @@ pub struct Config {}
 pub fn init(config: Config) -> Peripherals {
     rcc::init();
 
-    gpio::init();
+    unsafe {
+        gpio::init();
+    }
 
     ::critical_section::with(|cs| unsafe {
         exti::init(cs);

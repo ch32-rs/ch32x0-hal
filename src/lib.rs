@@ -14,13 +14,20 @@ pub use peripheral::*;
 pub use peripherals::Peripherals;
 pub mod interrupt;
 pub mod peripherals;
+pub mod prelude;
+
+pub mod dma;
 
 pub mod exti;
 pub mod gpio;
 pub mod pioc;
 pub mod signature;
 pub mod spi;
+pub mod timer;
 pub mod usart;
+pub mod adc;
+
+mod traits;
 
 #[cfg(feature = "embassy")]
 pub mod embassy;

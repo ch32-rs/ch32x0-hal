@@ -29,7 +29,7 @@ impl embedded_hal::delay::DelayNs for CycleDelay {
     }
 
     #[highcode]
-    fn delay_ms(&mut self, mut ms: u32) {
+    fn delay_ms(&mut self, ms: u32) {
         let cycles_per_us = clocks().sysclk.to_Hz() as u32 / 1_500_000;
 
         for _ in 0..ms {
@@ -43,7 +43,8 @@ impl embedded_hal::delay::DelayNs for CycleDelay {
 /// A delay provided by the SysTick core peripheral
 ///
 /// This requires SysTick to be set up and running.
-/// Assumes conditions: upcount, hclk/8
+/// Assumes conditions: upcount, hclk.
+/// hclk/8 is not accurate enough for ns delays.
 pub struct SystickDelay;
 
 impl SystickDelay {
@@ -63,10 +64,18 @@ impl SystickDelay {
                 .stre()
                 .clear_bit()
                 .stclk()
-                .hclk_div8()
+                .hclk()
                 .ste()
                 .set_bit()
         });
+    }
+
+    // #[highcode]
+    pub fn delay_ticks(&mut self, n: u32) {
+        let rb = unsafe { &*pac::SYSTICK::PTR };
+        let target = rb.cntl().read().bits().wrapping_add(n-5); // 5 opcodes overhead
+        // FIXME: handle overflow
+        while rb.cntl().read().bits() < target {}
     }
 }
 
@@ -74,7 +83,7 @@ impl embedded_hal::delay::DelayNs for SystickDelay {
     fn delay_ns(&mut self, ns: u32) {
         let rb = unsafe { &*pac::SYSTICK::PTR };
 
-        let ticks = ns as u64 * clocks().sysclk.to_Hz() as u64 / 8 / 1_000_000_000;
+        let ticks = ns as u64 * clocks().sysclk.to_Hz() as u64 / 1_000_000_000;
         let target = rb.cnt().read().bits().wrapping_add(ticks);
 
         while rb.cnt().read().bits() < target {}
@@ -82,7 +91,7 @@ impl embedded_hal::delay::DelayNs for SystickDelay {
     fn delay_us(&mut self, us: u32) {
         let rb = unsafe { &*pac::SYSTICK::PTR };
 
-        let ticks = us as u64 * clocks().sysclk.to_Hz() as u64 / 8 / 1_000_000;
+        let ticks = us as u64 * clocks().sysclk.to_Hz() as u64 / 1_000_000;
         let target = rb.cnt().read().bits().wrapping_add(ticks);
 
         while rb.cnt().read().bits() < target {}
@@ -90,7 +99,7 @@ impl embedded_hal::delay::DelayNs for SystickDelay {
     fn delay_ms(&mut self, mut ms: u32) {
         let rb = unsafe { &*pac::SYSTICK::PTR };
 
-        let ticks = ms as u64 * clocks().sysclk.to_Hz() as u64 / 8 / 1_000;
+        let ticks = ms as u64 * clocks().sysclk.to_Hz() as u64 / 1_000;
         let target = rb.cnt().read().bits().wrapping_add(ticks);
 
         while ms > 0 {

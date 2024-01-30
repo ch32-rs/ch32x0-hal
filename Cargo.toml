@@ -28,26 +28,9 @@ embassy-time-driver = { version = "0.1.0", features = [
 nb = "1.1.0"
 embedded-hal-nb = "1.0.0"
 
-[dev-dependencies]
-embassy-time = { version = "0.3.0", features = ["tick-hz-32_768"] }
-panic-halt = "0.2.0"
-embassy-executor = { version = "0.5.0", features = [
-    "nightly",
-    "integrated-timers",
-    "arch-riscv32",
-    "executor-thread",
-] }
-bitfield = "0.14.0"
-display-interface-spi = "0.5.0"
-mipidsi = "0.7.1"
-embedded-graphics = "0.8.1"
-heapless = "0.8.0"
-
 [features]
 default = ["ch32x035f8u6", "embassy"]
-
 embassy = ["dep:embassy-sync", "dep:embassy-futures", "dep:embassy-time-driver"]
-
 device-selected = []
 
 
@@ -68,3 +51,21 @@ ch32x033f8p6 = []
 strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
 lto = true
 opt-level = "z" # Optimize for size.
+
+[dev-dependencies]
+embassy-time = { version = "0.3.0", features = ["tick-hz-32_768"] }
+panic-halt = "0.2.0"
+embassy-executor = { version = "0.5.0", features = [
+    "nightly",
+    "integrated-timers",
+    "arch-riscv32",
+    "executor-thread",
+] }
+bitfield = "0.14.0"
+display-interface-spi = "0.5.0"
+mipidsi = "0.7.1"
+embedded-graphics = "0.8.1"
+heapless = "0.8.0"
+
+memory-lcd-spi = { path = "../memory-lcd-spi" }
+embedded-hal-bus = "0.1.0"

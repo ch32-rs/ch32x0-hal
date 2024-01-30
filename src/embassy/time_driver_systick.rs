@@ -52,7 +52,7 @@ impl SystickDriver {
         let rb = unsafe { &*pac::SYSTICK::PTR };
         let hclk = crate::rcc::clocks().hclk.to_Hz() as u64;
 
-        let cnt_per_second = hclk / 8;
+        let cnt_per_second = hclk; // not HCLK/8
         let cnt_per_tick = cnt_per_second / embassy_time_driver::TICK_HZ;
 
         self.period.store(cnt_per_tick as u32, Ordering::Relaxed);
@@ -62,7 +62,7 @@ impl SystickDriver {
         critical_section::with(|_| {
             rb.sr().write(|w| w.cntif().bit(false)); // clear
 
-            // Configration: Upcount, No reload, HCLK/8 as clock source
+            // Configration: Upcount, No reload, HCLK as clock source
             rb.ctlr().modify(|_, w| {
                 w.init()
                     .set_bit()
@@ -71,7 +71,7 @@ impl SystickDriver {
                     .stre()
                     .clear_bit()
                     .stclk()
-                    .hclk_div8()
+                    .hclk()
                     .ste()
                     .set_bit()
             });

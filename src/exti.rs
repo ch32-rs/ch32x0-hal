@@ -1,14 +1,12 @@
 use core::future::Future;
 use core::marker::PhantomData;
-use core::panic;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use ch32x0::ch32x035::pfic;
 use embassy_sync::waitqueue::AtomicWaker;
 
 use crate::gpio::{AnyPin, Input, Level, Pin as GpioPin};
-use crate::{impl_peripheral, pac, peripherals, println, Peripheral};
+use crate::{impl_peripheral, pac, peripherals, Peripheral};
 
 const EXTI_COUNT: usize = 24;
 const NEW_AW: AtomicWaker = AtomicWaker::new();

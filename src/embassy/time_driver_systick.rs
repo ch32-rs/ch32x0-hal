@@ -9,7 +9,6 @@ use embassy_time_driver::{AlarmHandle, Driver};
 use qingke::interrupt::Priority;
 
 use crate::pac;
-use crate::pac::Interrupt;
 
 pub const ALARM_COUNT: usize = 1;
 

@@ -45,8 +45,6 @@ unsafe extern "C" fn USBPD() {
         match usbpd.status().read().bmc_aux().bits() {
             PD_SOP0 => {
                 let len = usbpd.bmc_byte_cnt().read().bits();
-
-                // crate::println!("len = {}", len);
                 if len >= 6 {
                     // qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
                     // If GOODCRC, do not answer and ignore this reception

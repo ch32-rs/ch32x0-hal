@@ -288,7 +288,7 @@ async fn main(spawner: Spawner) -> ! {
     cs.set_low();
 
     let mut spi_config = hal::spi::Config::default();
-    spi_config.frequency = 12.MHz();
+    spi_config.frequency = 24.MHz();
 
     let mut spi = Spi::new_txonly(p.SPI1, sck, sda, NoDma, NoDma, spi_config);
 
@@ -309,7 +309,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut i = 0;
 
-    display.clear(Rgb565::CSS_DARK_SLATE_BLUE).unwrap();
+    display.clear(Rgb565::BLACK).unwrap();
 
     Line::new(Point::new(0, 0), Point::new(159, 0))
         .into_styled(PrimitiveStyle::with_stroke(Rgb565::RED, 1))

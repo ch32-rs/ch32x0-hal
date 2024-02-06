@@ -4,9 +4,7 @@ use core::sync::atomic::{compiler_fence, AtomicU8, Ordering};
 use core::task::Poll;
 
 use aligned::Aligned;
-use ch32x0::ch32x035::adc::iofr1::W;
 use embassy_sync::waitqueue::AtomicWaker;
-use embassy_time::Delay;
 use embedded_hal::delay::DelayNs;
 use qingke_rt::highcode;
 
@@ -16,7 +14,7 @@ use crate::pac::Interrupt;
 use crate::usbpd::protocol::{
     AugmentedPowerDataObject, BatterySupplyPowerDataObject, FixedPowerDataObject, Header, Request,
 };
-use crate::{into_ref, pac, peripherals, println, Peripheral, PeripheralRef};
+use crate::{into_ref, pac, peripherals, println, Peripheral};
 
 mod consts;
 pub mod protocol;
@@ -31,9 +29,9 @@ static mut PD_ACK_BUF: Aligned<aligned::A4, [u8; 2]> = Aligned([0; 2]);
 
 static MSG_ID: AtomicU8 = AtomicU8::new(0);
 
-// for bmc aux
+// field def for bmc_aux
 const PD_SOP0: u8 = 0b01;
-const PD_SOP1: u8 = 0b10; // Hard Reset
+const PD_SOP1: u8 = 0b10; // Hard Reset, 2
 const PD_SOP2: u8 = 0b11; // Cable Reset
 
 #[no_mangle]
@@ -41,41 +39,40 @@ const PD_SOP2: u8 = 0b11; // Cable Reset
 unsafe extern "C" fn USBPD() {
     let usbpd = &*pac::USBPD::PTR;
 
-    let status = usbpd.status().read();
-
-    // println!("IRQ {:08x}", status.bits());
-    // 接收完成中断标志
     if usbpd.status().read().if_rx_act().bit_is_set() {
         usbpd.status().modify(|_, w| w.if_rx_act().set_bit()); // clear IF_RX_ACT
 
-        if usbpd.status().read().bmc_aux().bits() == PD_SOP0 {
-            let len = usbpd.bmc_byte_cnt().read().bits();
+        match usbpd.status().read().bmc_aux().bits() {
+            PD_SOP0 => {
+                let len = usbpd.bmc_byte_cnt().read().bits();
 
-            // crate::println!("len = {}", len);
-            if len >= 6 {
-                // qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
+                // crate::println!("len = {}", len);
+                if len >= 6 {
+                    // qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
+                    // If GOODCRC, do not answer and ignore this reception
+                    if len != 6 || PD_RX_BUF[0] & 0x1F != consts::DEF_TYPE_GOODCRC {
+                        // usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit()); // as flag
+                        SystickDelay.delay_us(25); // delay 30us to send GoodCRC // max 195us
+                                                   //crate::delay::SystickDelay.delay_ms(30); // delay 30us to send GoodCRC // max 195us
+                        PD_ACK_BUF[0] = 0x41; // 0b10_00001
+                        PD_ACK_BUF[1] = PD_RX_BUF[1] & 0x0E;
 
-                // If GOODCRC, do not answer and ignore this reception
-                if len != 6 || PD_RX_BUF[0] & 0x1F != consts::DEF_TYPE_GOODCRC {
-                    // usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit()); // as flag
+                        usbpd.config().modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
+                        UsbPdSink::<'static, peripherals::USBPD>::send_phy(consts::UPD_SOP0, &PD_ACK_BUF[..2]);
+                        //println!("send good crc");
 
-                    SystickDelay.delay_us(25); // delay 30us to send GoodCRC // max 195us
-                                               //crate::delay::SystickDelay.delay_ms(30); // delay 30us to send GoodCRC // max 195us
-
-                    PD_ACK_BUF[0] = 0x41; // 0b10_00001
-                    PD_ACK_BUF[1] = PD_RX_BUF[1] & 0x0E;
-
-                    //let header = protocol::Header(u16::from_le_bytes([PD_ACK_BUF[0], PD_ACK_BUF[1]]));
-                    //println!("header: {:?}", header);
-
-                    usbpd.config().modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
-                    UsbPdSink::<'static, peripherals::USBPD>::send_phy(consts::UPD_SOP0, &PD_ACK_BUF[..2]);
-                    //println!("send good crc");
-
-                    // RX_WAKER.wake();
-                    // GoodCRC is handled in receive_raw
+                        // RX_WAKER.wake();
+                        // GoodCRC is handled in receive_raw
+                    }
                 }
             }
+            PD_SOP1 => {
+                // hard reset
+            }
+            PD_SOP2 => {
+                // cable reset
+            }
+            _ => (),
         }
     }
 
@@ -99,15 +96,9 @@ unsafe extern "C" fn USBPD() {
 
         // reset
         // usbpd.set_rx_mode();
-
         // TODO: handle reset
         crate::println!("TODO: reset");
     }
-    //  if status.buf_err().bit_is_set() {
-    //     usbpd.status().modify(|_, w| w.buf_err().set_bit()); // clear BUF_ERR
-    // }
-
-    //  usbpd.status().modify(|r, w| unsafe { w.bits(r.bits()) });
 }
 
 pub struct UsbPdSink<'d, T: Instance> {

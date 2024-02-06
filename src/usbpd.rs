@@ -34,6 +34,23 @@ const PD_SOP0: u8 = 0b01;
 const PD_SOP1: u8 = 0b10; // Hard Reset, 2
 const PD_SOP2: u8 = 0b11; // Cable Reset
 
+/*
+const UPD_TMR_TX_48M: u8 = (80 - 1); // timer value for USB PD BMC transmittal @Fsys=48MHz
+const UPD_TMR_TX_24M: u8 = (40 - 1); // timer value for USB PD BMC transmittal @Fsys=24MHz
+const UPD_TMR_TX_12M: u8 = (20 - 1); // timer value for USB PD BMC transmittal @Fsys=12MHz
+const UPD_TMR_RX_48M: u8 = (120 - 1); // timer value for USB PD BMC receiving @Fsys=48MHz
+const UPD_TMR_RX_24M: u8 = (60 - 1); // timer value for USB PD BMC receiving @Fsys=24MHz
+const UPD_TMR_RX_12M: u8 = (30 - 1); // timer value for USB PD BMC receiving @Fsys=12MHz
+*/
+
+fn get_bmc_clk_for_tx() -> u16 {
+    (crate::rcc::clocks().hclk.to_MHz() * 80 / 48 - 1) as u16
+}
+
+fn get_bmc_clk_for_rx() -> u16 {
+    (crate::rcc::clocks().hclk.to_MHz() * 120 / 48 - 1) as u16
+}
+
 #[no_mangle]
 #[highcode]
 unsafe extern "C" fn USBPD() {
@@ -164,16 +181,9 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         usbpd.control().modify(|_, w| w.pd_tx_en().clear_bit()); // rx_en
 
-        // #define UPD_TMR_TX_48M    (80-1)                                             /* timer value for USB PD BMC transmittal @Fsys=48MHz */
-        // #define UPD_TMR_RX_48M    (120-1)                                            /* timer value for USB PD BMC receiving @Fsys=48MHz */
-        // #define UPD_TMR_TX_24M    (40-1)                                             /* timer value for USB PD BMC transmittal @Fsys=24MHz */
-        // #define UPD_TMR_RX_24M    (60-1)                                             /* timer value for USB PD BMC receiving @Fsys=24MHz */
-        // #define UPD_TMR_TX_12M    (20-1)                                             /* timer value for USB PD BMC transmittal @Fsys=12MHz */
-        // #define UPD_TMR_RX_12M    (30-1)                                             /* timer value for USB PD BMC receiving @Fsys=12MHz */
-        const UPD_TMR_RX_48M: u16 = 120 - 1;
         usbpd
             .bmc_clk_cnt()
-            .write(|w| unsafe { w.bmc_clk_cnt().bits(UPD_TMR_RX_48M) });
+            .write(|w| unsafe { w.bmc_clk_cnt().bits(get_bmc_clk_for_rx()) });
         usbpd.control().modify(|_, w| w.bmc_start().set_bit());
 
         // unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
@@ -279,7 +289,8 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         // 2 9V
         // 3 12V
         // 4 15V
-        req.set_position(5);
+        // 5 20V
+        req.set_position(3);
 
         for _ in 0..2 {
             unsafe {
@@ -432,8 +443,9 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             usbpd.port_cc2().modify(|_, w| w.cc_lve().set_bit());
         }
 
-        const UPD_TMR_TX_48M: u16 = 80 - 1;
-        usbpd.bmc_clk_cnt().write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
+        usbpd
+            .bmc_clk_cnt()
+            .write(|w| w.bmc_clk_cnt().variant(get_bmc_clk_for_tx()));
 
         let dma_addr = buf.as_ptr() as u32 & 0xFFFF;
 
@@ -472,8 +484,9 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             usbpd.port_cc2().modify(|_, w| w.cc_lve().set_bit());
         }
 
-        const UPD_TMR_TX_48M: u16 = 80 - 1;
-        usbpd.bmc_clk_cnt().write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
+        usbpd
+            .bmc_clk_cnt()
+            .write(|w| w.bmc_clk_cnt().variant(get_bmc_clk_for_tx()));
 
         let dma_addr = (buf.as_ptr() as u32 & 0xFFFF) as u16;
 
@@ -502,9 +515,10 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         } else {
             usbpd.port_cc2().modify(|_, w| w.cc_lve().set_bit());
         }
-        const UPD_TMR_TX_48M: u16 = 80 - 1;
 
-        usbpd.bmc_clk_cnt().write(|w| w.bmc_clk_cnt().variant(UPD_TMR_TX_48M));
+        usbpd
+            .bmc_clk_cnt()
+            .write(|w| w.bmc_clk_cnt().variant(get_bmc_clk_for_tx()));
 
         usbpd.dma().write(|w| unsafe { w.bits(0) });
 

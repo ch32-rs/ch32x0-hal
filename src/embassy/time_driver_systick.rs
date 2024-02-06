@@ -7,6 +7,7 @@ use core::{mem, ptr};
 use critical_section::{CriticalSection, Mutex};
 use embassy_time_driver::{AlarmHandle, Driver};
 use qingke::interrupt::Priority;
+use qingke_rt::highcode;
 
 use crate::pac;
 
@@ -77,6 +78,7 @@ impl SystickDriver {
         })
     }
 
+    #[inline(always)]
     fn on_interrupt(&self) {
         let rb = unsafe { &*pac::SYSTICK::PTR };
         rb.ctlr().modify(|_, w| w.stie().clear_bit()); // disable interrupt
@@ -165,6 +167,7 @@ impl Driver for SystickDriver {
 }
 
 #[no_mangle]
+#[highcode]
 extern "C" fn SysTick() {
     DRIVER.on_interrupt();
 }

@@ -109,8 +109,18 @@ pub const TX_SEL4_SYNC2: u8 = 0 << 6; // 00-SYNC2
 pub const TX_SEL4_SYNC3: u8 = 1 << 6; // 01-SYNC3
 pub const TX_SEL4_RST2: u8 = 2 << 6; // 1x-RST2
 
+// Start of Packet Sequences
+/// SOP
 pub const UPD_SOP0: u8 = TX_SEL1_SYNC1 | TX_SEL2_SYNC1 | TX_SEL3_SYNC1 | TX_SEL4_SYNC2; // SOP1
+/// SOP'
 pub const UPD_SOP1: u8 = TX_SEL1_SYNC1 | TX_SEL2_SYNC1 | TX_SEL3_SYNC3 | TX_SEL4_SYNC3; // SOP2
+/// SOP''
 pub const UPD_SOP2: u8 = TX_SEL1_SYNC1 | TX_SEL2_SYNC3 | TX_SEL3_SYNC1 | TX_SEL4_SYNC3; // SOP3
+
 pub const UPD_HARD_RESET: u8 = TX_SEL1_RST1 | TX_SEL2_RST1 | TX_SEL3_RST1 | TX_SEL4_RST2; // Hard Reset
 pub const UPD_CABLE_RESET: u8 = TX_SEL1_RST1 | TX_SEL2_SYNC1 | TX_SEL3_RST1 | TX_SEL4_SYNC3; // Cable Reset
+
+/* PD Revision */
+pub const DEF_PD_REVISION_10: u8 = 0x00;
+pub const DEF_PD_REVISION_20: u8 = 0x01;
+pub const DEF_PD_REVISION_30: u8 = 0x02;

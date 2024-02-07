@@ -5,6 +5,7 @@ use core::task::Poll;
 
 use aligned::Aligned;
 use embassy_sync::waitqueue::AtomicWaker;
+use embassy_time::Timer;
 use embedded_hal::delay::DelayNs;
 use qingke_rt::highcode;
 
@@ -14,9 +15,9 @@ use crate::pac::Interrupt;
 use crate::usbpd::protocol::{
     AugmentedPowerDataObject, BatterySupplyPowerDataObject, FixedPowerDataObject, Header, Request,
 };
-use crate::{into_ref, pac, peripherals, println, Peripheral};
+use crate::{interrupt, into_ref, pac, peripherals, println, Peripheral};
 
-mod consts;
+pub mod consts;
 pub mod protocol;
 
 const NEW_AW: AtomicWaker = AtomicWaker::new();
@@ -34,85 +35,67 @@ const PD_SOP0: u8 = 0b01;
 const PD_SOP1: u8 = 0b10; // Hard Reset, 2
 const PD_SOP2: u8 = 0b11; // Cable Reset
 
-/*
-const UPD_TMR_TX_48M: u8 = (80 - 1); // timer value for USB PD BMC transmittal @Fsys=48MHz
-const UPD_TMR_TX_24M: u8 = (40 - 1); // timer value for USB PD BMC transmittal @Fsys=24MHz
-const UPD_TMR_TX_12M: u8 = (20 - 1); // timer value for USB PD BMC transmittal @Fsys=12MHz
-const UPD_TMR_RX_48M: u8 = (120 - 1); // timer value for USB PD BMC receiving @Fsys=48MHz
-const UPD_TMR_RX_24M: u8 = (60 - 1); // timer value for USB PD BMC receiving @Fsys=24MHz
-const UPD_TMR_RX_12M: u8 = (30 - 1); // timer value for USB PD BMC receiving @Fsys=12MHz
-*/
-
-fn get_bmc_clk_for_tx() -> u16 {
-    (crate::rcc::clocks().hclk.to_MHz() * 80 / 48 - 1) as u16
+/// Interrupt handler.
+pub struct InterruptHandler<T: Instance> {
+    _phantom: PhantomData<T>,
 }
 
-fn get_bmc_clk_for_rx() -> u16 {
-    (crate::rcc::clocks().hclk.to_MHz() * 120 / 48 - 1) as u16
-}
+impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
+    unsafe fn on_interrupt() {
+        let usbpd = T::regs();
 
-#[no_mangle]
-#[highcode]
-unsafe extern "C" fn USBPD() {
-    let usbpd = &*pac::USBPD::PTR;
+        if usbpd.status().read().if_rx_act().bit_is_set() {
+            usbpd.status().modify(|_, w| w.if_rx_act().set_bit()); // clear IF_RX_ACT
 
-    if usbpd.status().read().if_rx_act().bit_is_set() {
-        usbpd.status().modify(|_, w| w.if_rx_act().set_bit()); // clear IF_RX_ACT
-
-        match usbpd.status().read().bmc_aux().bits() {
-            PD_SOP0 => {
-                let len = usbpd.bmc_byte_cnt().read().bits();
-                if len >= 6 {
-                    // qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
+            match usbpd.status().read().bmc_aux().bits() {
+                PD_SOP0 => {
+                    let len = usbpd.bmc_byte_cnt().read().bits();
                     // If GOODCRC, do not answer and ignore this reception
-                    if len != 6 || PD_RX_BUF[0] & 0x1F != consts::DEF_TYPE_GOODCRC {
-                        // usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit()); // as flag
-                        SystickDelay.delay_us(25); // delay 30us to send GoodCRC // max 195us
-                                                   //crate::delay::SystickDelay.delay_ms(30); // delay 30us to send GoodCRC // max 195us
-                        PD_ACK_BUF[0] = 0x41; // 0b10_00001
-                        PD_ACK_BUF[1] = PD_RX_BUF[1] & 0x0E;
+                    if len >= 6 {
+                        if len != 6 || PD_RX_BUF[0] & 0x1F != consts::DEF_TYPE_GOODCRC {
+                            usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit());
 
-                        usbpd.config().modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
-                        UsbPdSink::<'static, peripherals::USBPD>::send_phy(consts::UPD_SOP0, &PD_ACK_BUF[..2]);
-                        //println!("send good crc");
+                            qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
-                        // RX_WAKER.wake();
-                        // GoodCRC is handled in receive_raw
+                            RX_WAKER.wake();
+                            // GoodCRC is handled in receive
+                        }
+                    } else {
+                        let len = usbpd.bmc_byte_cnt().read().bits();
+                        println!("rx SOP0: {:?}", &PD_RX_BUF[..len as usize]);
                     }
                 }
+                PD_SOP1 => {
+                    // hard reset
+                }
+                PD_SOP2 => {
+                    // cable reset
+                }
+                _ => (),
             }
-            PD_SOP1 => {
-                // hard reset
-            }
-            PD_SOP2 => {
-                // cable reset
-            }
-            _ => (),
         }
-    }
 
-    // sending done
-    if usbpd.status().read().if_tx_end().bit_is_set() {
-        usbpd.port_cc1().modify(|_, w| w.cc_lve().clear_bit());
-        usbpd.port_cc2().modify(|_, w| w.cc_lve().clear_bit());
+        // sending done
+        if usbpd.status().read().if_tx_end().bit_is_set() {
+            usbpd.port_cc1().modify(|_, w| w.cc_lve().clear_bit());
+            usbpd.port_cc2().modify(|_, w| w.cc_lve().clear_bit());
 
-        qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
-        //  println!("tx end");
+            qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
-        usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
-        usbpd.config().modify(|_, w| w.ie_tx_end().clear_bit()); // set flag, triggered
+            usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
+            usbpd.config().modify(|_, w| w.ie_tx_end().clear_bit()); // set flag, triggered
 
-        TXEND_WAKER.wake();
-        RX_WAKER.wake();
-    }
+            TXEND_WAKER.wake();
+        }
 
-    if usbpd.status().read().if_rx_reset().bit_is_set() {
-        usbpd.status().modify(|_, w| w.if_rx_reset().set_bit()); // clear IF_RX_RESET
+        if usbpd.status().read().if_rx_reset().bit_is_set() {
+            usbpd.status().modify(|_, w| w.if_rx_reset().set_bit()); // clear IF_RX_RESET
 
-        // reset
-        // usbpd.set_rx_mode();
-        // TODO: handle reset
-        crate::println!("TODO: reset");
+            // reset
+            // usbpd.set_rx_mode();
+            // TODO: handle reset
+            crate::println!("TODO: reset");
+        }
     }
 }
 
@@ -217,8 +200,57 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
     }
 
+    pub fn dump_raw(&self, raw: &[u8]) {
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+
+        if header.msg_type() == consts::DEF_TYPE_SRC_CAP as _ {
+            println!("header: {:?}", header);
+
+            println!("Source Capabilities:");
+            let nobj = header.num_data_objs();
+            for i in 0..nobj {
+                let power_data = u32::from_le_bytes([
+                    raw[2 + i as usize * 4],
+                    raw[2 + i as usize * 4 + 1],
+                    raw[2 + i as usize * 4 + 2],
+                    raw[2 + i as usize * 4 + 3],
+                ]);
+                println!("=> {:08x}", power_data);
+                if power_data >> 30 == 0b00 {
+                    let power_data = FixedPowerDataObject(power_data);
+                    println!(
+                        "  Fixed Supply: {}mV {}mA, EPR: {}",
+                        power_data.voltage_50mv() * 50,
+                        power_data.max_current_10ma() * 10,
+                        power_data.epr_mode_capable()
+                    );
+                } else if power_data >> 30 == 0b01 {
+                    let power_data = BatterySupplyPowerDataObject(power_data);
+                    println!(
+                        "  Battery Supply: {}mV-{}mV {}mW",
+                        power_data.min_voltage_50mv() * 50,
+                        power_data.max_voltage_50mv() * 50,
+                        power_data.max_power_250mw() * 250
+                    );
+                } else if power_data >> 28 == 0b1100 {
+                    // Augmented Power Data Object (APDO)
+                    // SPR Programmable Power Supply
+                    let power_data = AugmentedPowerDataObject(power_data);
+                    println!(
+                        "  SPR PPS Augmented Supply: {}mV-{}mV {}mA",
+                        power_data.min_voltage_100mv() * 100,
+                        power_data.max_voltage_100mv() * 100,
+                        power_data.max_current_50ma() * 50
+                    );
+                } else {
+                    println!("unknown => {}", power_data);
+                }
+            }
+        }
+    }
+
     pub async fn receive_initial(&mut self) {
-        let raw = self.receive_raw().await;
+        let raw = self.receive_packet().await;
 
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
         println!("header: {:?}", header);
@@ -267,7 +299,57 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
     }
 
-    pub async fn request_pdo(&mut self) {
+    pub async fn get_cap(&mut self) {
+        let mut header = Header(0);
+        // header.set_msg_type(consts::DEF_TYPE_GET_SRC_CAP as _);
+        // header.set_msg_type(consts::DEF_TYPE_PING as _); => not supported
+        // DEF_TYPE_GET_STATUS => not
+
+        header.set_msg_type(consts::DEF_TYPE_GET_SRC_CAP);
+
+        header.set_spec_rev(0b10);
+        header.set_num_data_objs(0);
+        header.set_ext(false);
+        header.set_power_role(false);
+        header.set_data_role(false); // PD role
+        header.set_msg_id(3);
+
+        unsafe {
+            PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
+        }
+
+        let usbpd = T::regs();
+
+        usbpd
+            .config()
+            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
+        unsafe { qingke::pfic::disable_interrupt(Interrupt::USBPD as u8) };
+        unsafe {
+            self.blocking_send(consts::UPD_SOP0, &PD_TX_BUF[..2]);
+        }
+        println!("send get cap");
+
+        let raw = self.receive_packet().await;
+
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        println!("header: {:?}", header);
+        println!("raw: {:?}", raw);
+
+        self.dump_raw(&raw);
+
+        let raw = self.receive_packet().await;
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        println!("header: {:?}", header);
+        println!("raw: {:?}", raw);
+    }
+
+    // 0 illegal
+    // 1 5V
+    // 2 9V
+    // 3 12V
+    // 4 15V
+    // 5 20V
+    pub async fn request_pdo(&mut self, index: u8) {
         let mut header = Header(0);
         header.set_msg_type(consts::DEF_TYPE_REQUEST as _);
         header.set_spec_rev(0b10);
@@ -285,14 +367,11 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         req.set_epr_mode(false);
         req.set_unchunked_extended_message_support(false);
         req.set_capability_mismatch(false);
-        req.set_no_usb_suspend(false);
-        // 2 9V
-        // 3 12V
-        // 4 15V
-        // 5 20V
-        req.set_position(3);
+        req.set_no_usb_suspend(true);
 
-        for _ in 0..2 {
+        req.set_position(index);
+
+        for _ in 0..3 {
             unsafe {
                 PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
                 PD_TX_BUF[2..6].clone_from_slice(&u32::to_le_bytes(req.0));
@@ -303,17 +382,46 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             usbpd
                 .config()
                 .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
-            unsafe { qingke::pfic::disable_interrupt(Interrupt::USBPD as u8) };
             unsafe {
+                qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
                 self.blocking_send(consts::UPD_SOP0, &PD_TX_BUF[..6]);
             }
             // recv timeout 750us
 
-            let raw = self.receive_raw().await;
+            let raw = self.receive_packet().await;
 
             let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
             println!("header: {:?}", header);
+
+            if header.msg_type() == consts::DEF_TYPE_ACCEPT {
+                println!("Request Accepted");
+            } else if header.msg_type() == consts::DEF_TYPE_REJECT {
+                println!("Request Rejected");
+                return;
+            }
+
+            if header.msg_id() as u8 != MSG_ID.load(Ordering::Relaxed) {
+                MSG_ID.store(header.msg_id(), Ordering::Relaxed);
+            }
+            //            println!("header: {:?}", header);
             println!("raw: {:?}", raw);
+
+            let raw = self.receive_packet().await;
+            let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+            println!("header: {:?}", header);
+
+            println!("raw: {:?}", raw);
+
+            if header.msg_id() as u8 != MSG_ID.load(Ordering::Relaxed) {
+                MSG_ID.store(header.msg_id(), Ordering::Relaxed);
+
+                if header.msg_type() == consts::DEF_TYPE_PS_RDY {
+                    println!("PS_RDY");
+
+                    println!("ok");
+                    break;
+                }
+            }
         }
     }
 
@@ -326,7 +434,6 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             TXEND_WAKER.register(cx.waker());
 
             if T::regs().config().read().ie_tx_end().bit_is_clear() {
-                // usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
                 return Poll::Ready(());
             }
             Poll::Pending
@@ -336,7 +443,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         compiler_fence(Ordering::SeqCst);
     }
 
-    pub async fn receive_raw(&mut self) -> &'static [u8] {
+    pub async fn receive_packet(&mut self) -> &'static [u8] {
         let usbpd = T::regs();
 
         unsafe {
@@ -346,7 +453,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         self.set_rx_mode();
         usbpd
             .config()
-            .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().ie_tx_end().set_bit());
+            .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().ie_tx_end().clear_bit());
         unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
 
         compiler_fence(Ordering::SeqCst);
@@ -354,46 +461,38 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         poll_fn(|cx| {
             RX_WAKER.register(cx.waker());
 
-            if usbpd.config().read().ie_tx_end().bit_is_clear() {
+            if usbpd.config().read().ie_rx_act().bit_is_clear() {
                 return Poll::Ready(());
             }
             Poll::Pending
         })
         .await;
 
-        // let len = usbpd.bmc_byte_cnt().read().bits() as usize;
+        // CRCGOOD handling
+        unsafe {
+            PD_ACK_BUF[0] = 0x41; // 0b10_00001
+            PD_ACK_BUF[1] = PD_RX_BUF[1] & 0x0E;
+        }
 
-        /*
-            // check if need to send GoodCRC
-            crate::delay::SystickDelay.delay_us(20);
-            unsafe {
-                PD_TX_BUF[0] = 0x41; // 0b10_00001
-                PD_TX_BUF[1] = PD_RX_BUF[1] & 0x0E;
+        usbpd
+            .config()
+            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
+        unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
+        unsafe {
+            Self::send_phy(consts::UPD_SOP0, &PD_ACK_BUF[..2]);
+        }
+        compiler_fence(Ordering::SeqCst);
+
+        // wait for tx_end
+        poll_fn(|cx| {
+            TXEND_WAKER.register(cx.waker());
+
+            if usbpd.config().read().ie_tx_end().bit_is_clear() {
+                return Poll::Ready(());
             }
-
-            usbpd
-                .config()
-                .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
-            unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
-            unsafe {
-                Self::send_phy(consts::UPD_SOP0, &PD_TX_BUF[..2]);
-            }
-            compiler_fence(Ordering::SeqCst);
-
-            // wait for tx_end
-            poll_fn(|cx| {
-                TXEND_WAKER.register(cx.waker());
-
-                if usbpd.config().read().ie_tx_end().bit_is_clear() {
-                    return Poll::Ready(());
-                }
-                Poll::Pending
-            })
-            .await;
-        */
-
-        //self.set_rx_mode(); 之后,  BUF 会改变
-        // println!("good crc send");
+            Poll::Pending
+        })
+        .await;
 
         compiler_fence(Ordering::SeqCst);
 
@@ -500,11 +599,10 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         // usbpd.status().modify(|_, w| unsafe { w.bmc_aux().bits(0) }); // clear bmc aux status
         usbpd.control().modify(|_, w| w.pd_tx_en().set_bit()); // tx
         usbpd.status().write(|w| unsafe { w.bits(0) }); // clear bmc aux status
-        println!("after clean {}", usbpd.status().read().bits()); // need sleep here
+
+        SystickDelay.delay_us(400); // required for timing. no idea why
 
         usbpd.control().modify(|_, w| w.bmc_start().set_bit());
-
-        // usbpd.config().modify(|_, w| w.ie_tx_end().set_bit()); // enable tx_end irq
     }
 
     fn send_phy_empty_playload(&mut self, sop: u8) {
@@ -538,7 +636,27 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 pub(crate) mod sealed {
     use super::*;
 
+    /*
+    pub struct State {
+        pub rx_waker: AtomicWaker,
+        pub tx_waker: AtomicWaker,
+        pub msg_id: AtomicU8,
+    }
+
+    impl State {
+        pub const fn new() -> Self {
+            Self {
+                rx_waker: AtomicWaker::new(),
+                tx_waker: AtomicWaker::new(),
+                msg_id: AtomicU8::new(0),
+            }
+        }
+    }
+    */
+
     pub trait Instance {
+        type Interrupt: interrupt::Interrupt;
+
         #[inline(always)]
         fn regs() -> &'static pac::usbpd::RegisterBlock {
             unsafe { &*pac::USBPD::PTR }
@@ -555,7 +673,9 @@ pub(crate) mod sealed {
 
 pub trait Instance: Peripheral<P = Self> + sealed::Instance {}
 
-impl sealed::Instance for peripherals::USBPD {}
+impl sealed::Instance for peripherals::USBPD {
+    type Interrupt = interrupt::USBPD;
+}
 impl Instance for peripherals::USBPD {}
 
 pub trait Cc1Pin<T: Instance>: crate::gpio::Pin {}
@@ -569,3 +689,22 @@ macro_rules! pin_trait_impl {
 
 pin_trait_impl!(crate::usbpd::Cc1Pin, USBPD, PC14);
 pin_trait_impl!(crate::usbpd::Cc2Pin, USBPD, PC15);
+
+/*
+const UPD_TMR_TX_48M: u8 = (80 - 1); // timer value for USB PD BMC transmittal @Fsys=48MHz
+const UPD_TMR_TX_24M: u8 = (40 - 1); // timer value for USB PD BMC transmittal @Fsys=24MHz
+const UPD_TMR_TX_12M: u8 = (20 - 1); // timer value for USB PD BMC transmittal @Fsys=12MHz
+const UPD_TMR_RX_48M: u8 = (120 - 1); // timer value for USB PD BMC receiving @Fsys=48MHz
+const UPD_TMR_RX_24M: u8 = (60 - 1); // timer value for USB PD BMC receiving @Fsys=24MHz
+const UPD_TMR_RX_12M: u8 = (30 - 1); // timer value for USB PD BMC receiving @Fsys=12MHz
+*/
+
+#[inline]
+fn get_bmc_clk_for_tx() -> u16 {
+    (crate::rcc::clocks().hclk.to_MHz() * 80 / 48 - 1) as u16
+}
+
+#[inline]
+fn get_bmc_clk_for_rx() -> u16 {
+    (crate::rcc::clocks().hclk.to_MHz() * 120 / 48 - 1) as u16
+}

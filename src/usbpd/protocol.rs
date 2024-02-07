@@ -1,24 +1,30 @@
 use bitfield::bitfield;
 
+// Table 6.1 “Message Header”
 bitfield! {
     pub struct Header(u16);
     impl Debug;
-    u16;
+    u8;
+
     pub msg_type, set_msg_type : 4, 0;
     /// Port Data Role
     pub data_role, set_data_role : 5;
     pub spec_rev, set_spec_rev : 7, 6;
     /// Port Power Role
+    /// 0 for Sink
+    /// 1 for Source
     pub power_role, set_power_role : 8;
     pub msg_id, set_msg_id : 11, 9;
     pub num_data_objs, set_num_data_objs : 14, 12;
+    // 0 for Control Message or Data Message
+    // 1 for Extended Message
     pub ext, set_ext : 15;
 }
 
 bitfield! {
     pub struct Request(u32);
     impl Debug;
-    u32;
+    u8;
     /// Object Position
     pub positioin, set_position : 31, 28;
     pub give_back, set_give_back : 27;
@@ -75,6 +81,4 @@ bitfield! {
     pub max_voltage_100mv, _ : 24, 17;
     pub min_voltage_100mv, _ : 15, 8;
     pub max_current_50ma, _ : 6, 0;
-
-
 }

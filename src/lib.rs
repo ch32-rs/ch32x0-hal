@@ -51,3 +51,27 @@ pub fn init(config: Config) -> Peripherals {
 
     peripherals::Peripherals::take()
 }
+
+
+#[macro_export]
+macro_rules! bind_interrupts {
+    ($vis:vis struct $name:ident { $($irq:ident => $($handler:ty),*;)* }) => {
+        #[derive(Copy, Clone)]
+        $vis struct $name;
+
+        $(
+            #[allow(non_snake_case)]
+            #[no_mangle]
+            #[link_section = ".highcode"]
+            unsafe extern "C" fn $irq() {
+                $(
+                    <$handler as $crate::interrupt::Handler<$crate::interrupt::$irq>>::on_interrupt();
+                )*
+            }
+
+            $(
+                unsafe impl $crate::interrupt::Binding<$crate::interrupt::$irq, $handler> for $name {}
+            )*
+        )*
+    };
+}

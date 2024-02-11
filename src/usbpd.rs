@@ -1,6 +1,6 @@
 use core::future::poll_fn;
 use core::marker::PhantomData;
-use core::sync::atomic::{compiler_fence, AtomicU8, Ordering};
+use core::sync::atomic::{compiler_fence, AtomicBool, AtomicU8, Ordering};
 use core::task::Poll;
 
 use aligned::Aligned;
@@ -9,31 +9,38 @@ use embassy_time::Timer;
 use embedded_hal::delay::DelayNs;
 use qingke_rt::highcode;
 
+use self::protocol::{EPRModeDataObject, PPSRequest};
 use crate::delay::SystickDelay;
 use crate::gpio::Pull;
 use crate::pac::Interrupt;
 use crate::usbpd::protocol::{
-    AugmentedPowerDataObject, BatterySupplyPowerDataObject, FixedPowerDataObject, Header, Request,
+    AugmentedPowerDataObject, BatterySupplyPowerDataObject, ExtendedHeader, FixedPowerDataObject, FixedRequest, Header,
 };
 use crate::{interrupt, into_ref, pac, peripherals, println, Peripheral};
 
 pub mod consts;
 pub mod protocol;
+pub mod timing;
 
-const NEW_AW: AtomicWaker = AtomicWaker::new();
-static TXEND_WAKER: AtomicWaker = NEW_AW;
-static RX_WAKER: AtomicWaker = NEW_AW;
-
-static mut PD_RX_BUF: Aligned<aligned::A4, [u8; 34]> = Aligned([0; 34]);
+static mut PD_RX_BUF: Aligned<aligned::A4, [u8; 54]> = Aligned([0; 54]);
 static mut PD_TX_BUF: Aligned<aligned::A4, [u8; 34]> = Aligned([0; 34]);
 static mut PD_ACK_BUF: Aligned<aligned::A4, [u8; 2]> = Aligned([0; 2]);
-
-static MSG_ID: AtomicU8 = AtomicU8::new(0);
 
 // field def for bmc_aux
 const PD_SOP0: u8 = 0b01;
 const PD_SOP1: u8 = 0b10; // Hard Reset, 2
 const PD_SOP2: u8 = 0b11; // Cable Reset
+
+#[derive(Debug)]
+pub enum Error {
+    Rejected,
+    Timeout,
+    CCNotConnected,
+    NotSupported,
+    /// Unexpeted message type
+    Protocol(u8),
+    MaxRetry,
+}
 
 /// Interrupt handler.
 pub struct InterruptHandler<T: Instance> {
@@ -50,26 +57,36 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
             match usbpd.status().read().bmc_aux().bits() {
                 PD_SOP0 => {
                     let len = usbpd.bmc_byte_cnt().read().bits();
-                    // If GOODCRC, do not answer and ignore this reception
+
                     if len >= 6 {
-                        if len != 6 || PD_RX_BUF[0] & 0x1F != consts::DEF_TYPE_GOODCRC {
+                        let header = Header(u16::from_le_bytes([PD_RX_BUF[0], PD_RX_BUF[1]]));
+                        // 2 byte header + 4 byte CRC32
+                        if len == 6 && header.msg_type() == consts::DEF_TYPE_GOODCRC {
+                            usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit());
+
+                            qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
+                            //                            T::state().msg_id.store(header.msg_id(), Ordering::Relaxed);
+                            println!(">");
+                            T::state().acked.store(true, Ordering::Relaxed);
+                            T::state().ack_waker.wake(); // notifiy GoodCRC received
+                        } else {
                             usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit());
 
                             qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
-                            RX_WAKER.wake();
-                            // GoodCRC is handled in receive
+                            T::state().rx_waker.wake(); // notifiy receive
+                            println!("!");
                         }
-                    } else {
-                        let len = usbpd.bmc_byte_cnt().read().bits();
-                        println!("rx SOP0: {:?}", &PD_RX_BUF[..len as usize]);
                     }
                 }
                 PD_SOP1 => {
                     // hard reset
+                    println!("!! hard reset");
+                    T::state().msg_id.store(0, Ordering::Relaxed);
                 }
                 PD_SOP2 => {
                     // cable reset
+                    println!("!! cable reset");
                 }
                 _ => (),
             }
@@ -85,7 +102,7 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
             usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
             usbpd.config().modify(|_, w| w.ie_tx_end().clear_bit()); // set flag, triggered
 
-            TXEND_WAKER.wake();
+            T::state().tx_waker.wake();
         }
 
         if usbpd.status().read().if_rx_reset().bit_is_set() {
@@ -95,6 +112,7 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
             // usbpd.set_rx_mode();
             // TODO: handle reset
             crate::println!("TODO: reset");
+            T::state().msg_id.store(0, Ordering::Relaxed);
         }
     }
 }
@@ -145,7 +163,8 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         T::regs().port_cc2().write(|w| w.cc_ce().v0_66());
 
         let mut this = Self { _marker: PhantomData };
-        // this.set_rx_mode();
+        this.detect_cc();
+
         this
     }
 
@@ -154,9 +173,6 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         usbpd.config().modify(|_, w| w.pd_all_clr().set_bit());
         usbpd.config().modify(|_, w| w.pd_all_clr().clear_bit());
-        // usbpd
-        //    .config()
-        //    .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().pd_dma_en().set_bit());
 
         usbpd
             .dma()
@@ -168,17 +184,13 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             .bmc_clk_cnt()
             .write(|w| unsafe { w.bmc_clk_cnt().bits(get_bmc_clk_for_rx()) });
         usbpd.control().modify(|_, w| w.bmc_start().set_bit());
-
-        // unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
     }
 
     // 0, 1, 2
     pub fn detect_cc(&mut self) -> u8 {
         let usbpd = T::regs();
 
-        usbpd.port_cc1().modify(|_, w| w);
-        usbpd.port_cc2().modify(|_, w| w);
-
+        // CH32X035 has no internal CC pull down support
         usbpd.port_cc1().modify(|_, w| w.cc_ce().v0_22());
         SystickDelay.delay_us(2);
         // test if > 0.22V
@@ -200,7 +212,8 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
     }
 
-    pub fn dump_raw(&self, raw: &[u8]) {
+    /// Dump raw Power Data Objects
+    pub fn dump_pdo(&self, raw: &[u8]) {
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
 
         if header.msg_type() == consts::DEF_TYPE_SRC_CAP as _ {
@@ -215,14 +228,15 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
                     raw[2 + i as usize * 4 + 2],
                     raw[2 + i as usize * 4 + 3],
                 ]);
-                println!("=> {:08x}", power_data);
+                println!("{} => {:08x}", i + 1, power_data);
                 if power_data >> 30 == 0b00 {
-                    let power_data = FixedPowerDataObject(power_data);
+                    let fixed_pdo = FixedPowerDataObject(power_data);
                     println!(
                         "  Fixed Supply: {}mV {}mA, EPR: {}",
-                        power_data.voltage_50mv() * 50,
-                        power_data.max_current_10ma() * 10,
-                        power_data.epr_mode_capable()
+                        fixed_pdo.voltage_50mv() * 50,
+                        fixed_pdo.max_current_10ma() * 10,
+                        fixed_pdo.epr_mode_capable(),
+                        // fixed_pdo.unchunked_extended_messages_supported(),
                     );
                 } else if power_data >> 30 == 0b01 {
                     let power_data = BatterySupplyPowerDataObject(power_data);
@@ -250,53 +264,79 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
     }
 
     pub async fn receive_initial(&mut self) {
-        let raw = self.receive_packet().await;
+        let raw = self.receive_raw_packet(true).await;
 
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
         println!("header: {:?}", header);
 
-        if header.msg_type() == consts::DEF_TYPE_SRC_CAP as _ {
-            println!("Source Capabilities:");
-            let nobj = header.num_data_objs();
-            for i in 0..nobj {
-                let power_data = u32::from_le_bytes([
-                    raw[2 + i as usize * 4],
-                    raw[2 + i as usize * 4 + 1],
-                    raw[2 + i as usize * 4 + 2],
-                    raw[2 + i as usize * 4 + 3],
-                ]);
-                println!("=> {:08x}", power_data);
-                if power_data >> 30 == 0b00 {
-                    let power_data = FixedPowerDataObject(power_data);
-                    println!(
-                        "  Fixed Supply: {}mV {}mA, EPR: {}",
-                        power_data.voltage_50mv() * 50,
-                        power_data.max_current_10ma() * 10,
-                        power_data.epr_mode_capable()
-                    );
-                } else if power_data >> 30 == 0b01 {
-                    let power_data = BatterySupplyPowerDataObject(power_data);
-                    println!(
-                        "  Battery Supply: {}mV-{}mV {}mW",
-                        power_data.min_voltage_50mv() * 50,
-                        power_data.max_voltage_50mv() * 50,
-                        power_data.max_power_250mw() * 250
-                    );
-                } else if power_data >> 28 == 0b1100 {
-                    // Augmented Power Data Object (APDO)
-                    // SPR Programmable Power Supply
-                    let power_data = AugmentedPowerDataObject(power_data);
-                    println!(
-                        "  SPR PPS Augmented Supply: {}mV-{}mV {}mA",
-                        power_data.min_voltage_100mv() * 100,
-                        power_data.max_voltage_100mv() * 100,
-                        power_data.max_current_50ma() * 50
-                    );
-                } else {
-                    println!("unknown => {}", power_data);
-                }
+        self.dump_pdo(raw);
+    }
+
+    //    pub async fn get_
+
+    /// EPR_Mode
+    pub async fn enter_epr(&mut self) -> Result<(), Error> {
+        let mut header = Header(0);
+        header.set_msg_type(consts::DEF_TYPE_EPR_MODE);
+
+        header.set_spec_rev(0b10);
+        header.set_num_data_objs(1);
+        header.set_ext(false);
+        header.set_power_role(false);
+        header.set_data_role(false); // PD role
+        header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
+        let mut eprmdo = EPRModeDataObject(0);
+        eprmdo.set_action(EPRModeDataObject::ACTION_ENTER);
+        eprmdo.set_data(120); // 120W
+
+        unsafe {
+            PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
+            PD_TX_BUF[2..6].clone_from_slice(&u32::to_le_bytes(eprmdo.0));
+
+            self.send_raw_packet(consts::UPD_SOP0, &PD_TX_BUF[..6]).await;
+        }
+
+        let raw = self.receive_raw_packet(false).await;
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        let raw2 = self.receive_raw_packet(true).await; // recv as soon as possible
+        let header2 = Header(u16::from_le_bytes([raw2[0], raw2[1]]));
+        // FIXME: protocol is too fast to handle, actually raw and raw2 overlap
+        if header.msg_type() == consts::DEF_TYPE_EPR_MODE && header2.msg_type() == consts::DEF_TYPE_EPR_MODE {
+            let eprmdo = EPRModeDataObject(u32::from_le_bytes([raw[2], raw[3], raw[4], raw[5]]));
+            if eprmdo.action() == EPRModeDataObject::ACTION_ENTER_SUCCEEDED {
+                return Ok(());
             }
         }
+        return Err(Error::Rejected);
+    }
+
+    // not supported?
+    pub async fn get_pps_status(&mut self) {
+        let mut header = Header(0);
+        header.set_msg_type(consts::DEF_TYPE_GET_PPS_STATUS);
+
+        header.set_spec_rev(0b10);
+        header.set_num_data_objs(0);
+        header.set_ext(false);
+        header.set_power_role(false);
+        header.set_data_role(false); // PD role
+        header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
+        unsafe {
+            PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
+        }
+
+        unsafe {
+            self.send_raw_packet(consts::UPD_SOP0, &PD_TX_BUF[..2]).await;
+        }
+
+        let raw = self.receive_raw_packet(false).await;
+
+        let header0 = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        let extheader = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
+        println!("header get_pps status: {:?} {:?}", header, extheader);
+        println!("raw 0: {:?}", raw);
     }
 
     pub async fn get_cap(&mut self) {
@@ -305,14 +345,14 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         // header.set_msg_type(consts::DEF_TYPE_PING as _); => not supported
         // DEF_TYPE_GET_STATUS => not
 
-        header.set_msg_type(consts::DEF_TYPE_GET_SRC_CAP);
+        header.set_msg_type(consts::DEF_TYPE_GET_CTY_CODES);
 
         header.set_spec_rev(0b10);
         header.set_num_data_objs(0);
         header.set_ext(false);
         header.set_power_role(false);
         header.set_data_role(false); // PD role
-        header.set_msg_id(3);
+        header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
 
         unsafe {
             PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
@@ -329,27 +369,22 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
         println!("send get cap");
 
-        let raw = self.receive_packet().await;
+        let raw = self.receive_raw_packet(true).await;
 
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
         println!("header: {:?}", header);
         println!("raw: {:?}", raw);
 
-        self.dump_raw(&raw);
+        self.dump_pdo(&raw);
 
-        let raw = self.receive_packet().await;
+        let raw = self.receive_raw_packet(true).await;
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
         println!("header: {:?}", header);
         println!("raw: {:?}", raw);
     }
 
-    // 0 illegal
-    // 1 5V
-    // 2 9V
-    // 3 12V
-    // 4 15V
-    // 5 20V
-    pub async fn request_pdo(&mut self, index: u8) {
+    // 6
+    pub async fn request_pps_pdo(&mut self, index: u8, mv: u32, ma: u32) -> Result<(), Error> {
         let mut header = Header(0);
         header.set_msg_type(consts::DEF_TYPE_REQUEST as _);
         header.set_spec_rev(0b10);
@@ -357,109 +392,116 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         header.set_ext(false);
         header.set_power_role(false);
         header.set_data_role(false); // PD role
-        header.set_msg_id(0);
 
-        // 0002d12c
-        let mut req = Request(0x0);
+        // header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
+        let mut req = PPSRequest(0x0);
         req.set_usb_comm_capable(false);
-        req.set_max_operating_current_10ma(100);
-        req.set_operating_current_10ma(100);
-        req.set_epr_mode(false);
+        req.set_epr_mode_capable(true);
         req.set_unchunked_extended_message_support(false);
         req.set_capability_mismatch(false);
-        req.set_no_usb_suspend(true);
+        req.set_no_usb_suspend(false);
+
+        req.set_output_voltage_20mv((mv / 20).max(1) as _);
+        req.set_operating_current_50ma((ma / 50).max(1) as _);
+        req.set_position(index);
+
+        self.request_pdo(header, req.0).await
+    }
+
+    /// 0 illegal
+    /// 1 5V
+    /// 2 9V
+    /// 3 12V
+    /// 4 15V
+    /// 5 20V
+    pub async fn request_fixed_pdo(&mut self, index: u8) -> Result<(), Error> {
+        let mut header = Header(0);
+        header.set_msg_type(consts::DEF_TYPE_REQUEST as _);
+        header.set_spec_rev(0b10);
+        header.set_num_data_objs(1);
+
+        let mut req = FixedRequest(0x0);
+        req.set_max_operating_current_10ma(100);
+        req.set_operating_current_10ma(100);
+        req.set_usb_comm_capable(false);
+        req.set_epr_mode_capable(true);
+        req.set_unchunked_extended_message_support(false);
+        req.set_capability_mismatch(false);
+        req.set_no_usb_suspend(false);
 
         req.set_position(index);
 
-        for _ in 0..3 {
+        self.request_pdo(header, req.0).await
+    }
+
+    // PDO, fixed or PPS
+    async fn request_pdo(&mut self, mut header: Header, pdo: u32) -> Result<(), Error> {
+        let mut retries = 0;
+        loop {
+            header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
             unsafe {
                 PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
-                PD_TX_BUF[2..6].clone_from_slice(&u32::to_le_bytes(req.0));
+                PD_TX_BUF[2..6].clone_from_slice(&u32::to_le_bytes(pdo));
+
+                self.send_raw_packet(consts::UPD_SOP0, &PD_TX_BUF[..6]).await;
             }
 
-            let usbpd = T::regs();
+            let raw = self.receive_raw_packet(false).await;
 
-            usbpd
-                .config()
-                .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
-            unsafe {
-                qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
-                self.blocking_send(consts::UPD_SOP0, &PD_TX_BUF[..6]);
-            }
-            // recv timeout 750us
+            let header0 = Header(u16::from_le_bytes([raw[0], raw[1]]));
+            // println!("header0: {:?}", header);
 
-            let raw = self.receive_packet().await;
-
-            let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
-            println!("header: {:?}", header);
-
-            if header.msg_type() == consts::DEF_TYPE_ACCEPT {
-                println!("Request Accepted");
-            } else if header.msg_type() == consts::DEF_TYPE_REJECT {
-                println!("Request Rejected");
-                return;
-            }
-
-            if header.msg_id() as u8 != MSG_ID.load(Ordering::Relaxed) {
-                MSG_ID.store(header.msg_id(), Ordering::Relaxed);
-            }
-            //            println!("header: {:?}", header);
-            println!("raw: {:?}", raw);
-
-            let raw = self.receive_packet().await;
-            let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
-            println!("header: {:?}", header);
-
-            println!("raw: {:?}", raw);
-
-            if header.msg_id() as u8 != MSG_ID.load(Ordering::Relaxed) {
-                MSG_ID.store(header.msg_id(), Ordering::Relaxed);
-
-                if header.msg_type() == consts::DEF_TYPE_PS_RDY {
-                    println!("PS_RDY");
-
-                    println!("ok");
-                    break;
+            if header0.msg_type() == consts::DEF_TYPE_ACCEPT {
+                // println!("Request Accepted");
+                break;
+            } else if header0.msg_type() == consts::DEF_TYPE_REJECT {
+                return Err(Error::Rejected);
+            } else {
+                retries += 1;
+                if retries > 3 {
+                    return Err(Error::MaxRetry);
                 }
+                continue;
             }
+        }
+
+        let raw = self.receive_raw_packet(true).await;
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        //println!("header: {:?}", header);
+        // println!("raw: {:?}", raw);
+
+        if header.msg_id() as u8 != T::state().msg_id.load(Ordering::Relaxed) {
+            T::state().msg_id.store(header.msg_id(), Ordering::Relaxed);
+        }
+
+        if header.msg_type() == consts::DEF_TYPE_PS_RDY {
+            //           println!("PS_RDY");
+            Ok(())
+        } else {
+            Err(Error::Protocol(header.msg_type()))
         }
     }
 
-    #[inline]
-    async fn wait_for_tx_end(&mut self) {
-        compiler_fence(Ordering::SeqCst);
+    /// Receive raw packet and handle GoodCRC ack, ends with tx mode
+    // Header + Data + CRC32
+    pub async fn receive_raw_packet(&mut self, set_mode: bool) -> &'static [u8] {
+        unsafe { PD_RX_BUF.fill(0) };
 
-        // wait for tx_end
-        poll_fn(|cx| {
-            TXEND_WAKER.register(cx.waker());
-
-            if T::regs().config().read().ie_tx_end().bit_is_clear() {
-                return Poll::Ready(());
-            }
-            Poll::Pending
-        })
-        .await;
-
-        compiler_fence(Ordering::SeqCst);
-    }
-
-    pub async fn receive_packet(&mut self) -> &'static [u8] {
         let usbpd = T::regs();
 
-        unsafe {
-            PD_RX_BUF.fill(0);
+        if set_mode {
+            self.set_rx_mode();
         }
-
-        self.set_rx_mode();
         usbpd
             .config()
             .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().ie_tx_end().clear_bit());
         unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
-
         compiler_fence(Ordering::SeqCst);
 
         poll_fn(|cx| {
-            RX_WAKER.register(cx.waker());
+            T::state().rx_waker.register(cx.waker());
 
             if usbpd.config().read().ie_rx_act().bit_is_clear() {
                 return Poll::Ready(());
@@ -468,59 +510,43 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         })
         .await;
 
-        // CRCGOOD handling
-        unsafe {
-            PD_ACK_BUF[0] = 0x41; // 0b10_00001
-            PD_ACK_BUF[1] = PD_RX_BUF[1] & 0x0E;
-        }
-
-        usbpd
-            .config()
-            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
-        unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
-        unsafe {
-            Self::send_phy(consts::UPD_SOP0, &PD_ACK_BUF[..2]);
-        }
-        compiler_fence(Ordering::SeqCst);
-
-        // wait for tx_end
-        poll_fn(|cx| {
-            TXEND_WAKER.register(cx.waker());
-
-            if usbpd.config().read().ie_tx_end().bit_is_clear() {
-                return Poll::Ready(());
-            }
-            Poll::Pending
-        })
-        .await;
-
-        compiler_fence(Ordering::SeqCst);
-
         let header = unsafe { Header(u16::from_le_bytes([PD_RX_BUF[0], PD_RX_BUF[1]])) };
-        let len = 2 + header.num_data_objs() * 4;
+        let len = usbpd.bmc_byte_cnt().read().bits();
+
+        self.ack_goodcrc(header.msg_id()).await;
+        // T::state().fetch_update_msg_id();
+        // println!("ack {}", header.msg_id());
+        T::state().msg_id.store(header.msg_id(), Ordering::Relaxed);
+
         unsafe { &PD_RX_BUF[..len as usize] }
     }
 
-    pub async fn send(&mut self) {
+    /// Send raw packet, and wait for GoodCRC ack, ends with rx mode
+    async fn send_raw_packet(&mut self, sop: u8, buf: &'static [u8]) {
         let usbpd = T::regs();
 
+        self.blocking_send(sop, buf);
+
+        // wait for googd crc
+        usbpd.config().modify(|_, w| w.ie_rx_act().set_bit());
+        T::state().acked.store(false, Ordering::Relaxed);
+        self.set_rx_mode();
+        unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
         compiler_fence(Ordering::SeqCst);
-
+        // wait for GoodCRC ack
         poll_fn(|cx| {
-            TXEND_WAKER.register(cx.waker());
-
-            if usbpd.status().read().if_tx_end().bit_is_set() {
-                usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
-
-                unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
-
+            T::state().ack_waker.register(cx.waker());
+            //println!("pool");
+            //if usbpd.config().read().ie_rx_act().bit_is_clear() {
+            if T::state().acked.load(Ordering::Relaxed) {
                 return Poll::Ready(());
             }
             Poll::Pending
         })
         .await;
 
-        compiler_fence(Ordering::SeqCst);
+        let header = unsafe { Header(u16::from_le_bytes([PD_RX_BUF[0], PD_RX_BUF[1]])) };
+        T::state().msg_id.store(header.msg_id(), Ordering::Relaxed);
     }
 
     /// Do USB PD hard reset. If the MCU is powering from VBUS, it will be powered off.
@@ -533,8 +559,14 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         T::regs().port_cc2().write(|w| w.cc_ce().v0_66());
     }
 
+    /// Blocking send packet
     fn blocking_send(&mut self, sop: u8, buf: &[u8]) {
         let usbpd = unsafe { &*pac::USBPD::PTR };
+
+        unsafe { qingke::pfic::disable_interrupt(Interrupt::USBPD as u8) };
+        usbpd
+            .config()
+            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
 
         if usbpd.config().read().cc_sel().is_cc1() {
             usbpd.port_cc1().modify(|_, w| w.cc_lve().set_bit());
@@ -555,7 +587,6 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             .bmc_tx_sz()
             .write(|w| unsafe { w.bmc_tx_sz().bits(buf.len() as _) });
 
-        // usbpd.status().modify(|_, w| unsafe { w.bmc_aux().bits(0) }); // clear bmc aux status
         usbpd.control().modify(|_, w| w.pd_tx_en().set_bit()); // tx
         usbpd.status().write(|w| unsafe { w.bits(0) });
 
@@ -570,8 +601,6 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         } else {
             usbpd.port_cc2().modify(|_, w| w.cc_lve().clear_bit());
         }
-
-        self.set_rx_mode();
     }
 
     fn send_phy(sop: u8, buf: &[u8]) {
@@ -596,11 +625,11 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             .bmc_tx_sz()
             .write(|w| unsafe { w.bmc_tx_sz().bits(buf.len() as _) });
 
-        // usbpd.status().modify(|_, w| unsafe { w.bmc_aux().bits(0) }); // clear bmc aux status
         usbpd.control().modify(|_, w| w.pd_tx_en().set_bit()); // tx
         usbpd.status().write(|w| unsafe { w.bits(0) }); // clear bmc aux status
 
-        SystickDelay.delay_us(400); // required for timing. no idea why
+        // println!("fuck why {}", usbpd.status().read().bits());
+        SystickDelay.delay_us(300); // required for timing. no idea why
 
         usbpd.control().modify(|_, w| w.bmc_start().set_bit());
     }
@@ -631,16 +660,55 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         usbpd.control().modify(|_, w| w.bmc_start().set_bit());
     }
+
+    async fn ack_goodcrc(&mut self, msg_id: u8) {
+        let usbpd = T::regs();
+
+        let mut header = Header(0);
+        header.set_msg_type(consts::DEF_TYPE_GOODCRC);
+        header.set_data_role(false);
+        header.set_power_role(false);
+        header.set_spec_rev(0b10);
+        header.set_msg_id(msg_id);
+        // CRCGOOD handling
+        unsafe {
+            PD_ACK_BUF[..2].copy_from_slice(&u16::to_le_bytes(header.0));
+        }
+
+        usbpd
+            .config()
+            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
+        unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
+        compiler_fence(Ordering::SeqCst);
+        unsafe {
+            Self::send_phy(consts::UPD_SOP0, &PD_ACK_BUF[..2]);
+        }
+
+        // wait for tx_end
+        poll_fn(|cx| {
+            T::state().tx_waker.register(cx.waker());
+
+            if usbpd.config().read().ie_tx_end().bit_is_clear() {
+                return Poll::Ready(());
+            }
+            Poll::Pending
+        })
+        .await;
+    }
 }
 
 pub(crate) mod sealed {
     use super::*;
 
-    /*
     pub struct State {
         pub rx_waker: AtomicWaker,
         pub tx_waker: AtomicWaker,
+        /// ACK, GoodCRC
+        pub ack_waker: AtomicWaker,
+        // 0 to 7 counter
         pub msg_id: AtomicU8,
+
+        pub acked: AtomicBool,
     }
 
     impl State {
@@ -648,11 +716,18 @@ pub(crate) mod sealed {
             Self {
                 rx_waker: AtomicWaker::new(),
                 tx_waker: AtomicWaker::new(),
+                ack_waker: AtomicWaker::new(),
                 msg_id: AtomicU8::new(0),
+                acked: AtomicBool::new(false),
             }
         }
+
+        pub fn fetch_update_msg_id(&self) -> u8 {
+            self.msg_id
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| Some((x + 1) & 0b111))
+                .unwrap()
+        }
     }
-    */
 
     pub trait Instance {
         type Interrupt: interrupt::Interrupt;
@@ -661,6 +736,8 @@ pub(crate) mod sealed {
         fn regs() -> &'static pac::usbpd::RegisterBlock {
             unsafe { &*pac::USBPD::PTR }
         }
+
+        fn state() -> &'static State;
 
         fn enable_and_reset() {
             let rcc = unsafe { &*pac::RCC::ptr() };
@@ -675,6 +752,11 @@ pub trait Instance: Peripheral<P = Self> + sealed::Instance {}
 
 impl sealed::Instance for peripherals::USBPD {
     type Interrupt = interrupt::USBPD;
+
+    fn state() -> &'static crate::usbpd::sealed::State {
+        static STATE: crate::usbpd::sealed::State = crate::usbpd::sealed::State::new();
+        &STATE
+    }
 }
 impl Instance for peripherals::USBPD {}
 

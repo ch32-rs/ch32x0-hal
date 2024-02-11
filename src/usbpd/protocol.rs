@@ -6,35 +6,35 @@ bitfield! {
     impl Debug;
     u8;
 
-    pub msg_type, set_msg_type : 4, 0;
-    /// Port Data Role
-    pub data_role, set_data_role : 5;
-    pub spec_rev, set_spec_rev : 7, 6;
+    // 0 for Control Message or Data Message
+    // 1 for Extended Message
+    pub ext, set_ext : 15;
+    pub num_data_objs, set_num_data_objs : 14, 12;
+    pub msg_id, set_msg_id : 11, 9;
     /// Port Power Role
     /// 0 for Sink
     /// 1 for Source
     pub power_role, set_power_role : 8;
-    pub msg_id, set_msg_id : 11, 9;
-    pub num_data_objs, set_num_data_objs : 14, 12;
-    // 0 for Control Message or Data Message
-    // 1 for Extended Message
-    pub ext, set_ext : 15;
+    /// Specification Revision
+    /// 00b –Revision 1.0
+    /// 01b –Revision 2.0
+    /// 10b – Revision 3.0
+    pub spec_rev, set_spec_rev : 7, 6;
+    /// Port Data Role
+    pub data_role, set_data_role : 5;
+    pub msg_type, set_msg_type : 4, 0;
 }
 
+// Table 6.3 “Extended Message Header”
 bitfield! {
-    pub struct Request(u32);
+    pub struct ExtendedHeader(u16);
     impl Debug;
     u8;
-    /// Object Position
-    pub positioin, set_position : 31, 28;
-    pub give_back, set_give_back : 27;
-    pub capability_mismatch, set_capability_mismatch : 26;
-    pub usb_comm_capable, set_usb_comm_capable : 25;
-    pub no_usb_suspend, set_no_usb_suspend : 24;
-    pub unchunked_extended_message_support, set_unchunked_extended_message_support : 23;
-    pub epr_mode, set_epr_mode : 22;
-    pub operating_current_10ma, set_operating_current_10ma : 19, 10;
-    pub max_operating_current_10ma, set_max_operating_current_10ma : 9, 0;
+
+    pub chunked, set_chunked : 15;
+    pub chunk_number, set_chunk_number : 14, 11;
+    pub request_chunk, set_request_chunk : 10;
+    pub u16, data_size, set_data_size : 9, 0;
 }
 
 bitfield! {
@@ -81,4 +81,63 @@ bitfield! {
     pub max_voltage_100mv, _ : 24, 17;
     pub min_voltage_100mv, _ : 15, 8;
     pub max_current_50ma, _ : 6, 0;
+}
+
+bitfield! {
+    /// Table 6.51 “EPR Mode Data Object (EPRMDO)”
+    pub struct EPRModeDataObject(u32);
+    impl Debug;
+    u8;
+
+    pub action, set_action : 31, 24;
+    // EPR Sink Operational PDP or Fail cause
+    pub data, set_data: 23, 16;
+}
+
+impl EPRModeDataObject {
+    // action field
+    pub const ACTION_ENTER: u8 = 0x01;
+    pub const ACTION_ENTER_ACK: u8 = 0x02;
+    /// Enter Succeeded
+    pub const ACTION_ENTER_SUCCEEDED: u8 = 0x03;
+    pub const ACTION_ENTER_FAILED: u8 = 0x04;
+    pub const ACTION_EXIT: u8 = 0x05;
+}
+
+// Request Data Object (RDO)
+
+// Fixed and Variable Request Data Object
+bitfield! {
+    pub struct FixedRequest(u32);
+    impl Debug;
+    u8;
+    /// Object Position
+    pub positioin, set_position : 31, 28;
+    pub give_back, set_give_back : 27; // = 0
+    pub capability_mismatch, set_capability_mismatch : 26;
+    pub usb_comm_capable, set_usb_comm_capable : 25;
+    pub no_usb_suspend, set_no_usb_suspend : 24;
+    pub unchunked_extended_message_support, set_unchunked_extended_message_support : 23;
+    pub epr_mode_capable, set_epr_mode_capable : 22;
+    pub u16, operating_current_10ma, set_operating_current_10ma : 19, 10;
+    pub u16, max_operating_current_10ma, set_max_operating_current_10ma : 9, 0;
+}
+
+// TODO: Battery Request Data Object
+
+// Table 6.26 “PPS Request Data Object”
+bitfield! {
+    pub struct PPSRequest(u32);
+    impl Debug;
+    u8;
+    /// Object Position
+    pub positioin, set_position : 31, 28;
+
+    pub capability_mismatch, set_capability_mismatch : 26;
+    pub usb_comm_capable, set_usb_comm_capable : 25;
+    pub no_usb_suspend, set_no_usb_suspend : 24;
+    pub unchunked_extended_message_support, set_unchunked_extended_message_support : 23;
+    pub epr_mode_capable, set_epr_mode_capable : 22;
+    pub u16, output_voltage_20mv, set_output_voltage_20mv : 20, 9;
+    pub operating_current_50ma, set_operating_current_50ma : 6, 0;
 }

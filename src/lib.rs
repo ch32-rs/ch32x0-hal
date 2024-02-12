@@ -52,7 +52,6 @@ pub fn init(config: Config) -> Peripherals {
     peripherals::Peripherals::take()
 }
 
-
 #[macro_export]
 macro_rules! bind_interrupts {
     ($vis:vis struct $name:ident { $($irq:ident => $($handler:ty),*;)* }) => {

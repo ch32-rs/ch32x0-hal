@@ -73,8 +73,8 @@ impl SystickDelay {
     // #[highcode]
     pub fn delay_ticks(&mut self, n: u32) {
         let rb = unsafe { &*pac::SYSTICK::PTR };
-        let target = rb.cntl().read().bits().wrapping_add(n-5); // 5 opcodes overhead
-        // FIXME: handle overflow
+        let target = rb.cntl().read().bits().wrapping_add(n - 5); // 5 opcodes overhead
+                                                                  // FIXME: handle overflow
         while rb.cntl().read().bits() < target {}
     }
 }

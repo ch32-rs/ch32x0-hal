@@ -2,7 +2,6 @@ use crate::impl_peripheral;
 
 pub mod word;
 
-
 /// "No DMA" placeholder.
 ///
 /// You may pass this in place of a real DMA channel when creating a driver

@@ -396,7 +396,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
     }
 
-    //
+    // Not impled
     pub async fn epr_keep_alive(&mut self) -> Result<(), Error> {
         let mut header = Header(0);
         header.set_spec_rev(0b10);
@@ -434,7 +434,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
     }
 
-    pub async fn request_epr_pdo(&mut self) -> Result<(), Error> {
+    pub async fn request_epr_pdo(&mut self, index: u8, pdo: u32) -> Result<(), Error> {
         let mut header = Header(0);
         header.set_msg_type(consts::DEF_TYPE_EPR_REQUEST);
         header.set_num_data_objs(2); // 1 RDO 1 PDO copy
@@ -442,13 +442,13 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
 
         let mut rdo = FixedRequest(0);
-        rdo.set_position(8);
+        rdo.set_position(index);
         rdo.set_no_usb_suspend(false);
         rdo.set_epr_mode_capable(true);
         rdo.set_max_operating_current_10ma(200);
         rdo.set_operating_current_10ma(100);
 
-        let pdo: u32 = 0x0088c1f4;
+        // let pdo: u32 = 0x0088c1f4;
         //let pdo = 0x0002d12c;
         unsafe {
             PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
@@ -459,7 +459,6 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         let raw = self.receive_raw_packet(false).await;
         let header0 = Header(u16::from_le_bytes([raw[0], raw[1]]));
-        println!("headerXX: {:?}", header0);
         if header0.msg_type() == consts::DEF_TYPE_ACCEPT {
             // println!("Request Accepted");
         } else if header0.msg_type() == consts::DEF_TYPE_REJECT {
@@ -474,7 +473,6 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
 
         if header.msg_type() == consts::DEF_TYPE_PS_RDY {
-            //           println!("PS_RDY");
             Ok(())
         } else {
             Err(Error::Protocol(header.msg_type()))

@@ -136,12 +136,6 @@ impl EPRModeDataObject {
 
 // Sink Capabilities
 
-
-
-
-
-
-
 // Request Data Object (RDO)
 
 // Fixed and Variable Request Data Object

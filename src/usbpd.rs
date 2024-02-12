@@ -9,12 +9,14 @@ use embassy_time::Timer;
 use embedded_hal::delay::DelayNs;
 use qingke_rt::highcode;
 
+use self::consts::{ExtendedControlType, ExtendedMessageType};
 use self::protocol::{EPRModeDataObject, PPSRequest};
 use crate::delay::SystickDelay;
 use crate::gpio::Pull;
 use crate::pac::Interrupt;
 use crate::usbpd::protocol::{
-    AugmentedPowerDataObject, BatterySupplyPowerDataObject, ExtendedHeader, FixedPowerDataObject, FixedRequest, Header,
+    BatterySupplyPowerDataObject, ExtendedHeader, FixedPowerDataObject, FixedRequest, Header,
+    VariableSupplyPowerDataObject, EPR_APDO, PPS_APDO,
 };
 use crate::{interrupt, into_ref, pac, peripherals, println, Peripheral};
 
@@ -212,7 +214,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
     }
 
-    /// Dump raw Power Data Objects
+    // Dump Source Capabilities
     pub fn dump_pdo(&self, raw: &[u8]) {
         let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
 
@@ -220,45 +222,70 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             println!("header: {:?}", header);
 
             println!("Source Capabilities:");
-            let nobj = header.num_data_objs();
-            for i in 0..nobj {
-                let power_data = u32::from_le_bytes([
-                    raw[2 + i as usize * 4],
-                    raw[2 + i as usize * 4 + 1],
-                    raw[2 + i as usize * 4 + 2],
-                    raw[2 + i as usize * 4 + 3],
-                ]);
-                println!("{} => {:08x}", i + 1, power_data);
-                if power_data >> 30 == 0b00 {
-                    let fixed_pdo = FixedPowerDataObject(power_data);
-                    println!(
-                        "  Fixed Supply: {}mV {}mA, EPR: {}",
-                        fixed_pdo.voltage_50mv() * 50,
-                        fixed_pdo.max_current_10ma() * 10,
-                        fixed_pdo.epr_mode_capable(),
-                        // fixed_pdo.unchunked_extended_messages_supported(),
-                    );
-                } else if power_data >> 30 == 0b01 {
-                    let power_data = BatterySupplyPowerDataObject(power_data);
-                    println!(
-                        "  Battery Supply: {}mV-{}mV {}mW",
-                        power_data.min_voltage_50mv() * 50,
-                        power_data.max_voltage_50mv() * 50,
-                        power_data.max_power_250mw() * 250
-                    );
-                } else if power_data >> 28 == 0b1100 {
-                    // Augmented Power Data Object (APDO)
-                    // SPR Programmable Power Supply
-                    let power_data = AugmentedPowerDataObject(power_data);
-                    println!(
-                        "  SPR PPS Augmented Supply: {}mV-{}mV {}mA",
-                        power_data.min_voltage_100mv() * 100,
-                        power_data.max_voltage_100mv() * 100,
-                        power_data.max_current_50ma() * 50
-                    );
-                } else {
-                    println!("unknown => {}", power_data);
-                }
+            let nobj = header.num_data_objs() as usize;
+            self.dump_raw_pdo(&raw[2..nobj * 4]);
+        }
+    }
+
+    /// Dump raw Power Data Objects
+    pub fn dump_raw_pdo(&self, raw: &[u8]) {
+        println!("Source Capabilities:");
+        let nobj = raw.len() / 4;
+        for i in 0..nobj {
+            let power_data = u32::from_le_bytes([
+                raw[i as usize * 4],
+                raw[i as usize * 4 + 1],
+                raw[i as usize * 4 + 2],
+                raw[i as usize * 4 + 3],
+            ]);
+            println!("{} => {:08x}", i + 1, power_data);
+            if power_data >> 30 == 0b00 {
+                let fixed_pdo = FixedPowerDataObject(power_data);
+                println!(
+                    "  Fixed Supply: {}mV {}mA, EPR: {}",
+                    fixed_pdo.voltage_50mv() * 50,
+                    fixed_pdo.max_current_10ma() * 10,
+                    fixed_pdo.epr_mode_capable(),
+                    // fixed_pdo.unchunked_extended_messages_supported(),
+                );
+            } else if power_data >> 30 == 0b01 {
+                let bat_pdo = BatterySupplyPowerDataObject(power_data);
+                println!(
+                    "  Battery Supply: {}mV-{}mV {}mW",
+                    bat_pdo.min_voltage_50mv() * 50,
+                    bat_pdo.max_voltage_50mv() * 50,
+                    bat_pdo.max_power_250mw() * 250
+                );
+            } else if power_data >> 30 == 0b10 {
+                // Variable Supply (non-Battery)
+                let var_pdo = VariableSupplyPowerDataObject(power_data);
+                println!(
+                    "  Variable Supply: {}mV-{}mV {}mA",
+                    var_pdo.min_voltage_50mv() * 50,
+                    var_pdo.max_voltage_50mv() * 50,
+                    var_pdo.max_current_10ma() * 10
+                );
+            } else if power_data >> 28 == 0b1100 {
+                // Augmented Power Data Object (APDO)
+                // SPR Programmable Power Supply
+                let pps_apdo = PPS_APDO(power_data);
+                println!(
+                    "  SPR PPS Augmented Supply: {}mV-{}mV {}mA",
+                    pps_apdo.min_voltage_100mv() * 100,
+                    pps_apdo.max_voltage_100mv() * 100,
+                    pps_apdo.max_current_50ma() * 50
+                );
+            } else if power_data >> 28 == 0b1101 {
+                // EPR Adjustable Voltage Supply
+                let epr_apdo = EPR_APDO(power_data);
+                println!(
+                    "  EPR Adjustable Supply: {}mV-{}mV {}W",
+                    epr_apdo.min_voltage_100mv() * 100,
+                    epr_apdo.max_voltage_100mv() * 100,
+                    epr_apdo.pdp_1w()
+                );
+            } else {
+                println!("unknown => {}", power_data);
             }
         }
     }
@@ -281,7 +308,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         header.set_spec_rev(0b10);
         header.set_num_data_objs(1);
-        header.set_ext(false);
+        header.set_extended(false);
         header.set_power_role(false);
         header.set_data_role(false); // PD role
         header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
@@ -311,6 +338,149 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         return Err(Error::Rejected);
     }
 
+    // Handle EPR Src Capabilities
+    pub async fn get_epr_src_cap(&mut self) -> Result<(), Error> {
+        let mut buf: heapless::Vec<u8, 128> = Default::default();
+
+        let raw = self.receive_raw_packet(true).await;
+        // buf.extend_from_slice(&raw[4..]);
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        let ext_header = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
+
+        // 2 byte ext header, 2 byte padding
+        buf.extend_from_slice(&raw[4..4 + header.num_data_objs() as usize * 4 - 4])
+            .unwrap();
+        // ref: PESinkWaitForHandleEPRChunk, PESinkHandleEPRChunk
+        if header.extended() && ext_header.chunked() {
+            let chunk_number = ext_header.chunk_number();
+
+            // request next chunk
+            let mut header = Header(0);
+            header.set_spec_rev(0b10);
+            header.set_num_data_objs(1);
+            header.set_extended(true);
+            header.set_msg_type(ExtendedMessageType::EPRSourceCapabilities as u8);
+            header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
+            let mut ext_header = ExtendedHeader(0);
+            ext_header.set_chunk_number(chunk_number + 1);
+            ext_header.set_request_chunk(true);
+            ext_header.set_chunked(true);
+
+            unsafe {
+                PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
+                PD_TX_BUF[2..4].clone_from_slice(&u16::to_le_bytes(ext_header.0));
+                PD_TX_BUF[4] = 0;
+                PD_TX_BUF[5] = 0; // padding
+                self.send_raw_packet(consts::UPD_SOP0, &PD_TX_BUF[..6]).await;
+            }
+
+            let raw = self.receive_raw_packet(true).await;
+
+            let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+            let ext_header = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
+
+            // ??? TODO, padding
+            buf.extend_from_slice(&raw[6..6 + header.num_data_objs() as usize * 4 - 4])
+                .unwrap();
+
+            // println!("headerXX: {:?}", header);
+            //println!("ext_headerXX: {:?}", ext_header);
+            //println!("raw => {:02x?}", raw);
+
+            //  self.dump_raw_pdo(&buf);
+
+            Ok(())
+        } else {
+            Err(Error::Protocol(header.msg_type()))
+        }
+    }
+
+    //
+    pub async fn epr_keep_alive(&mut self) -> Result<(), Error> {
+        let mut header = Header(0);
+        header.set_spec_rev(0b10);
+        header.set_num_data_objs(1);
+        header.set_extended(true);
+        header.set_msg_type(ExtendedMessageType::ExtendedControl as u8);
+        header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
+        let mut ext_header = ExtendedHeader(0);
+        ext_header.set_chunked(false);
+        ext_header.set_data_size(2);
+
+        unsafe {
+            PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
+            PD_TX_BUF[2..4].clone_from_slice(&u16::to_le_bytes(ext_header.0));
+            // ECDB
+            PD_TX_BUF[4] = ExtendedControlType::EPR_KeepAlive as u8; // type
+            PD_TX_BUF[5] = 0; // data
+            self.send_raw_packet(consts::UPD_SOP0, &PD_TX_BUF[..6]).await;
+        }
+
+        let raw = self.receive_raw_packet(false).await;
+
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        // let ext_header = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
+        println!("rawXX: {:?}\n{:?}", raw, header);
+
+        if header.extended()
+            && header.msg_type() == ExtendedMessageType::ExtendedControl as u8
+            && raw[4] == ExtendedControlType::EPR_KeepAlive_Ack as u8
+        {
+            Ok(())
+        } else {
+            Err(Error::Protocol(header.msg_type()))
+        }
+    }
+
+    pub async fn request_epr_pdo(&mut self) -> Result<(), Error> {
+        let mut header = Header(0);
+        header.set_msg_type(consts::DEF_TYPE_EPR_REQUEST);
+        header.set_num_data_objs(2); // 1 RDO 1 PDO copy
+        header.set_spec_rev(0b10);
+        header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
+
+        let mut rdo = FixedRequest(0);
+        rdo.set_position(8);
+        rdo.set_no_usb_suspend(false);
+        rdo.set_epr_mode_capable(true);
+        rdo.set_max_operating_current_10ma(200);
+        rdo.set_operating_current_10ma(100);
+
+        let pdo: u32 = 0x0088c1f4;
+        //let pdo = 0x0002d12c;
+        unsafe {
+            PD_TX_BUF[0..2].clone_from_slice(&u16::to_le_bytes(header.0));
+            PD_TX_BUF[2..6].clone_from_slice(&u32::to_le_bytes(rdo.0));
+            PD_TX_BUF[6..10].clone_from_slice(&u32::to_le_bytes(pdo));
+            self.send_raw_packet(consts::UPD_SOP0, &PD_TX_BUF[..10]).await;
+        }
+
+        let raw = self.receive_raw_packet(false).await;
+        let header0 = Header(u16::from_le_bytes([raw[0], raw[1]]));
+        println!("headerXX: {:?}", header0);
+        if header0.msg_type() == consts::DEF_TYPE_ACCEPT {
+            // println!("Request Accepted");
+        } else if header0.msg_type() == consts::DEF_TYPE_REJECT {
+            return Err(Error::Rejected);
+        } else if header0.msg_type() == consts::DEF_TYPE_WAIT {
+            return Err(Error::Rejected); // TODO ? wait
+        } else {
+            return Err(Error::Protocol(header0.msg_type()));
+        }
+
+        let raw = self.receive_raw_packet(true).await;
+        let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
+
+        if header.msg_type() == consts::DEF_TYPE_PS_RDY {
+            //           println!("PS_RDY");
+            Ok(())
+        } else {
+            Err(Error::Protocol(header.msg_type()))
+        }
+    }
+
     // not supported?
     pub async fn get_pps_status(&mut self) {
         let mut header = Header(0);
@@ -318,7 +488,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         header.set_spec_rev(0b10);
         header.set_num_data_objs(0);
-        header.set_ext(false);
+        header.set_extended(false);
         header.set_power_role(false);
         header.set_data_role(false); // PD role
         header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
@@ -349,7 +519,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         header.set_spec_rev(0b10);
         header.set_num_data_objs(0);
-        header.set_ext(false);
+        header.set_extended(false);
         header.set_power_role(false);
         header.set_data_role(false); // PD role
         header.set_msg_id(T::state().msg_id.load(Ordering::Relaxed));
@@ -389,7 +559,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         header.set_msg_type(consts::DEF_TYPE_REQUEST as _);
         header.set_spec_rev(0b10);
         header.set_num_data_objs(1);
-        header.set_ext(false);
+        header.set_extended(false);
         header.set_power_role(false);
         header.set_data_role(false); // PD role
 
@@ -707,7 +877,6 @@ pub(crate) mod sealed {
         pub ack_waker: AtomicWaker,
         // 0 to 7 counter
         pub msg_id: AtomicU8,
-
         pub acked: AtomicBool,
     }
 

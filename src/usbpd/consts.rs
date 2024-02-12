@@ -1,6 +1,8 @@
 // Control Message Types
 // Control Messages are short and manage the Message flow between Port Partners or for exchanging Messages that require no additional data.
 
+pub const PD_MAX_EXT_MSG_LEGACY_LEN: usize = 26;
+
 /// Send By: Source,Sink,Cable Plug
 pub const DEF_TYPE_GOODCRC: u8 = 0x01;
 /// Send By: Source
@@ -124,3 +126,47 @@ pub const UPD_CABLE_RESET: u8 = TX_SEL1_RST1 | TX_SEL2_SYNC1 | TX_SEL3_RST1 | TX
 pub const DEF_PD_REVISION_10: u8 = 0x00;
 pub const DEF_PD_REVISION_20: u8 = 0x01;
 pub const DEF_PD_REVISION_30: u8 = 0x02;
+
+// Table 6.54 “Extended Message Types”
+// when Header.ext=true
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum ExtendedMessageType {
+    SourceCapabilitiesExtended = 0b0_0001,
+    Status = 0b0_0010,
+    GetBatteryCap = 0b0_0011,
+    GetBatteryStatus = 0b0_0100,
+    BatteryCapabilities = 0b0_0101,
+    GetManufacturerInfo = 0b0_0110,
+    ManufacturerInfo = 0b0_0111,
+    SecurityRequest = 0b0_1000,
+    SecurityResponse = 0b0_1001,
+    FirmwareUpdateRequest = 0b0_1010,
+    FirmwareUpdateResponse = 0b0_1011,
+    PPSStatus = 0b0_1100,
+    CountryInfo = 0b0_1101,
+    CountryCodes = 0b0_1110,
+    SinkCapabilitiesExtended = 0b0_1111,
+    ExtendedControl = 0b1_0000,
+    // 17, 0x11
+    EPRSourceCapabilities = 0b1_0001,
+    EPRSinkCapabilities = 0b1_0010,
+
+    VendorDefinedExtended = 0b1_1111,
+}
+
+impl ExtendedMessageType {
+    pub fn from_u8(raw: u8) -> Self {
+        unsafe { core::mem::transmute(raw) }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+#[allow(non_camel_case_types)]
+pub enum ExtendedControlType {
+    EPR_Get_Source_Cap = 0x01,
+    EPR_Get_Sink_Cap = 0x02,
+    EPR_KeepAlive = 0x03,
+    EPR_KeepAlive_Ack = 0x04,
+}

@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 use bitfield::bitfield;
 
 // Table 6.1 “Message Header”
@@ -8,7 +9,8 @@ bitfield! {
 
     // 0 for Control Message or Data Message
     // 1 for Extended Message
-    pub ext, set_ext : 15;
+    pub extended, set_extended : 15;
+    // Number of data objects
     pub num_data_objs, set_num_data_objs : 14, 12;
     pub msg_id, set_msg_id : 11, 9;
     /// Port Power Role
@@ -50,6 +52,7 @@ bitfield! {
     pub usb_communications_capable, _ : 26;
     // supports DR_Swap message?
     pub dual_role_data, _ : 25;
+    // Set to 1 for unchunked extended messages
     pub unchunked_extended_messages_supported, _ : 24;
     // if the Source is designed to supply more than 100W and operate in EPR Mode.
     pub epr_mode_capable, _ : 23;
@@ -71,9 +74,23 @@ bitfield! {
     pub max_power_250mw, _ : 9, 0;
 }
 
+// Table 6.11 “Variable Supply (non-Battery) PDO – Source”
+bitfield! {
+    pub struct VariableSupplyPowerDataObject(u32);
+    impl Debug;
+    u32;
+
+    // 0b10
+    pub max_voltage_50mv, _ : 29, 20;
+    pub min_voltage_50mv, _ : 19, 10;
+    pub max_current_10ma, _ : 9, 0;
+}
+
 bitfield! {
     /// Table 6.8 “Augmented Power Data Object”, APDO
-    pub struct AugmentedPowerDataObject(u32);
+    /// Table 6.13 “SPR Programmable Power Supply APDO – Source”
+    /// PPS APDO
+    pub struct PPS_APDO(u32);
     impl Debug;
     u32;
     // 0b11
@@ -84,6 +101,19 @@ bitfield! {
 }
 
 bitfield! {
+    /// Table 6.14 “EPR Adjustable Voltage Supply APDO – Source “
+    pub struct EPR_APDO(u32);
+    impl Debug;
+    u32;
+    // 0b11
+    // 0b01
+    pub peak_current, _ : 27, 26;
+    pub max_voltage_100mv, _ : 25, 17;
+    pub min_voltage_100mv, _ : 15, 8;
+    pub pdp_1w, _ : 7, 0;
+}
+
+bitfield! {
     /// Table 6.51 “EPR Mode Data Object (EPRMDO)”
     pub struct EPRModeDataObject(u32);
     impl Debug;
@@ -91,6 +121,7 @@ bitfield! {
 
     pub action, set_action : 31, 24;
     // EPR Sink Operational PDP or Fail cause
+    // PDP when action = ACTION_ENTER
     pub data, set_data: 23, 16;
 }
 
@@ -98,11 +129,18 @@ impl EPRModeDataObject {
     // action field
     pub const ACTION_ENTER: u8 = 0x01;
     pub const ACTION_ENTER_ACK: u8 = 0x02;
-    /// Enter Succeeded
     pub const ACTION_ENTER_SUCCEEDED: u8 = 0x03;
     pub const ACTION_ENTER_FAILED: u8 = 0x04;
     pub const ACTION_EXIT: u8 = 0x05;
 }
+
+// Sink Capabilities
+
+
+
+
+
+
 
 // Request Data Object (RDO)
 
@@ -113,6 +151,7 @@ bitfield! {
     u8;
     /// Object Position
     pub positioin, set_position : 31, 28;
+
     pub give_back, set_give_back : 27; // = 0
     pub capability_mismatch, set_capability_mismatch : 26;
     pub usb_comm_capable, set_usb_comm_capable : 25;

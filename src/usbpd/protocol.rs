@@ -39,11 +39,131 @@ bitfield! {
     pub u16, data_size, set_data_size : 9, 0;
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum PowerDataObject {
+    FixedSupply(FixedSupplyPDO),
+    VariableSupply(VariableSupplyPDO),
+    BatterySupply(BatterySupplyPDO),
+    PPS(PPS_APDO),
+    AVS(AVS_APDO),
+    // for supplying 15V up to 48V.
+    EPR_AVS(EPR_AVS_APDO),
+}
+
+impl PowerDataObject {
+    pub fn from_u32(raw: u32) -> Self {
+        match raw >> 30 {
+            0b00 => PowerDataObject::FixedSupply(FixedSupplyPDO(raw)),
+            0b01 => PowerDataObject::BatterySupply(BatterySupplyPDO(raw)),
+            0b10 => PowerDataObject::VariableSupply(VariableSupplyPDO(raw)),
+            0b11 => match raw >> 28 {
+                0b1100 => PowerDataObject::PPS(PPS_APDO(raw)),
+                0b1101 => PowerDataObject::EPR_AVS(EPR_AVS_APDO(raw)),
+                0b1110 => PowerDataObject::AVS(AVS_APDO(raw)),
+                _ => PowerDataObject::FixedSupply(FixedSupplyPDO(raw)),
+            },
+            _ => PowerDataObject::FixedSupply(FixedSupplyPDO(raw)),
+        }
+    }
+}
+
+fn format_mv(f: &mut core::fmt::Formatter<'_>, mv: u32) -> core::fmt::Result {
+    if mv % 1000 == 0 {
+        write!(f, "{}V", mv / 1000)
+    } else if mv % 100 == 0 {
+        write!(f, "{}.{}V", mv / 1000, mv % 1000 / 100)
+    } else {
+        write!(f, "{}mV", mv)
+    }
+}
+fn format_ma(f: &mut core::fmt::Formatter<'_>, ma: u32) -> core::fmt::Result {
+    if ma % 1000 == 0 {
+        write!(f, "{}A", ma / 1000)
+    } else {
+        write!(f, "{}mA", ma)
+    }
+}
+
+fn format_mw(f: &mut core::fmt::Formatter<'_>, mw: u32) -> core::fmt::Result {
+    if mw % 1000 == 0 {
+        write!(f, "{}W", mw / 1000)
+    } else {
+        write!(f, "{}mW", mw)
+    }
+}
+
+impl core::fmt::Display for PowerDataObject {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PowerDataObject::FixedSupply(pdo) => {
+                if pdo.0 == 0 {
+                    write!(f, "Unused")
+                } else {
+                    write!(f, "Fixed(",)?;
+                    format_mv(f, pdo.voltage_50mv() * 50)?;
+                    write!(f, ",")?;
+                    format_ma(f, pdo.max_current_10ma() * 10)?;
+
+                    if pdo.epr_mode_capable() {
+                        write!(f, ",EPR)")
+                    } else {
+                        write!(f, ")")
+                    }
+                }
+            }
+            PowerDataObject::VariableSupply(pdo) => {
+                write!(f, "Variable(")?;
+                format_mv(f, pdo.min_voltage_50mv() * 50)?;
+                write!(f, "-")?;
+                format_mv(f, pdo.max_voltage_50mv() * 50)?;
+                write!(f, ",")?;
+                format_ma(f, pdo.max_current_10ma() * 10)?;
+                write!(f, ")")
+            }
+            PowerDataObject::BatterySupply(pdo) => {
+                write!(f, "Battery(")?;
+                format_mv(f, pdo.min_voltage_50mv() * 50)?;
+                write!(f, "-")?;
+                format_mv(f, pdo.max_voltage_50mv() * 50)?;
+                write!(f, ",")?;
+                format_mw(f, pdo.max_power_250mw() * 250)
+            }
+            PowerDataObject::PPS(pdo) => {
+                write!(f, "PPS(")?;
+                format_mv(f, pdo.min_voltage_100mv() * 100)?;
+                write!(f, "-")?;
+                format_mv(f, pdo.max_voltage_100mv() * 100)?;
+                write!(f, ",")?;
+                format_ma(f, pdo.max_current_50ma() * 50)?;
+                write!(f, ")")
+            }
+            PowerDataObject::AVS(pdo) => {
+                write!(f, "AVS({}mA @ 15V", pdo.max_current_10ma_15v() * 10)?;
+                if pdo.max_current_10ma_20v() != 0 {
+                    write!(f, ", {}mA @ 20V)", pdo.max_current_10ma_20v() * 10)
+                } else {
+                    write!(f, ")")
+                }
+            }
+            PowerDataObject::EPR_AVS(pdo) => write!(
+                f,
+                "EPR_AVS({}mV-{}mV,{}W)",
+                pdo.min_voltage_100mv() * 100,
+                pdo.max_voltage_100mv() * 100,
+                pdo.pdp_1w()
+            ),
+        }
+    }
+}
+
 bitfield! {
-    pub struct FixedPowerDataObject(u32);
+    /// Table 6.9 “Fixed Supply PDO – Source”
+    #[derive(Copy, Clone)]
+    pub struct FixedSupplyPDO(u32);
     impl Debug;
     u32;
 
+    // 0b00
     // supports PR_Swap message? equal in SrcCap, SinkCap
     pub dual_role_power, _ : 29;
     pub usb_suspend_supported, _ : 28;
@@ -62,21 +182,10 @@ bitfield! {
     pub max_current_10ma, _ : 9, 0;
 }
 
-//  Battery PDO uses power instead of current.
-bitfield! {
-    pub struct BatterySupplyPowerDataObject(u32);
-    impl Debug;
-    u32;
-
-    // 0b01
-    pub max_voltage_50mv, _ : 29, 20;
-    pub min_voltage_50mv, _ : 19, 10;
-    pub max_power_250mw, _ : 9, 0;
-}
-
 // Table 6.11 “Variable Supply (non-Battery) PDO – Source”
 bitfield! {
-    pub struct VariableSupplyPowerDataObject(u32);
+    #[derive(Copy, Clone)]
+    pub struct VariableSupplyPDO(u32);
     impl Debug;
     u32;
 
@@ -86,15 +195,29 @@ bitfield! {
     pub max_current_10ma, _ : 9, 0;
 }
 
+//  Battery PDO uses power instead of current.
 bitfield! {
-    /// Table 6.8 “Augmented Power Data Object”, APDO
+    /// Table 6.12 “Battery Supply PDO – Source”
+    #[derive(Copy, Clone)]
+    pub struct BatterySupplyPDO(u32);
+    impl Debug;
+    u32;
+
+    // 0b01
+    pub max_voltage_50mv, _ : 29, 20;
+    pub min_voltage_50mv, _ : 19, 10;
+    pub max_power_250mw, _ : 9, 0;
+}
+
+// Table 6.8 “Augmented Power Data Object”, APDO
+bitfield! {
     /// Table 6.13 “SPR Programmable Power Supply APDO – Source”
-    /// PPS APDO
+    /// SPR PPS APDO
+    #[derive(Copy, Clone)]
     pub struct PPS_APDO(u32);
     impl Debug;
     u32;
-    // 0b11
-    // 0b00
+    // 0b11b00
     pub max_voltage_100mv, _ : 24, 17;
     pub min_voltage_100mv, _ : 15, 8;
     pub max_current_50ma, _ : 6, 0;
@@ -102,15 +225,28 @@ bitfield! {
 
 bitfield! {
     /// Table 6.14 “EPR Adjustable Voltage Supply APDO – Source “
-    pub struct EPR_APDO(u32);
+    #[derive(Copy, Clone)]
+    pub struct EPR_AVS_APDO(u32);
     impl Debug;
     u32;
-    // 0b11
-    // 0b01
+    // 0b1101
     pub peak_current, _ : 27, 26;
     pub max_voltage_100mv, _ : 25, 17;
     pub min_voltage_100mv, _ : 15, 8;
     pub pdp_1w, _ : 7, 0;
+}
+
+bitfield! {
+       /// Table 6.16 “SPR Adjustable Voltage Supply APDO – Source”
+       /// 9V up to 20V
+    #[derive(Copy, Clone)]
+    pub struct AVS_APDO(u32);
+    impl Debug;
+    u32;
+    // 0b1110
+    pub peak_current, _ : 27, 26;
+    pub max_current_10ma_15v, _ : 19, 10;
+    pub max_current_10ma_20v, _ : 9, 0;
 }
 
 bitfield! {

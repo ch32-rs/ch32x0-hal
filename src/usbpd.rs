@@ -13,8 +13,7 @@ use crate::delay::SystickDelay;
 use crate::gpio::Pull;
 use crate::pac::Interrupt;
 use crate::usbpd::protocol::{
-    BatterySupplyPowerDataObject, ExtendedHeader, FixedPowerDataObject, FixedRequest, Header,
-    VariableSupplyPowerDataObject, EPR_APDO, PPS_APDO,
+    BatterySupplyPDO, ExtendedHeader, FixedRequest, FixedSupplyPDO, Header, VariableSupplyPDO, EPR_AVS_APDO, PPS_APDO,
 };
 use crate::{interrupt, into_ref, pac, peripherals, println, Peripheral};
 
@@ -238,9 +237,8 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             ]);
             println!("{} => 0x{:08x}", i + 1, power_data);
             if power_data == 0 {
-                println!("  Unused");
             } else if power_data >> 30 == 0b00 {
-                let fixed_pdo = FixedPowerDataObject(power_data);
+                let fixed_pdo = FixedSupplyPDO(power_data);
                 println!(
                     "  Fixed Supply: {}mV {}mA {}",
                     fixed_pdo.voltage_50mv() * 50,
@@ -249,7 +247,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
                     // fixed_pdo.unchunked_extended_messages_supported(),
                 );
             } else if power_data >> 30 == 0b01 {
-                let bat_pdo = BatterySupplyPowerDataObject(power_data);
+                let bat_pdo = BatterySupplyPDO(power_data);
                 println!(
                     "  Battery Supply: {}mV-{}mV {}mW",
                     bat_pdo.min_voltage_50mv() * 50,
@@ -258,7 +256,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
                 );
             } else if power_data >> 30 == 0b10 {
                 // Variable Supply (non-Battery)
-                let var_pdo = VariableSupplyPowerDataObject(power_data);
+                let var_pdo = VariableSupplyPDO(power_data);
                 println!(
                     "  Variable Supply: {}mV-{}mV {}mA",
                     var_pdo.min_voltage_50mv() * 50,
@@ -277,7 +275,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
                 );
             } else if power_data >> 28 == 0b1101 {
                 // EPR Adjustable Voltage Supply
-                let epr_apdo = EPR_APDO(power_data);
+                let epr_apdo = EPR_AVS_APDO(power_data);
                 println!(
                     "  EPR Adjustable Supply: {}mV-{}mV {}W",
                     epr_apdo.min_voltage_100mv() * 100,
@@ -387,12 +385,21 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             //println!("ext_headerXX: {:?}", ext_header);
             //println!("raw => {:02x?}", raw);
 
-            self.dump_raw_pdo(&buf);
+            //self.dump_raw_pdo(&buf);
+            // save pdo to state
+            for (i, ch) in buf.chunks(4).enumerate() {
+                let pdo = u32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]);
+                T::state().src_cap.borrow_mut()[i] = pdo;
+            }
 
             Ok(())
         } else {
             Err(Error::Protocol(header.msg_type()))
         }
+    }
+
+    pub fn last_capabilities(&self) -> [u32; 11] {
+        T::state().src_cap.borrow().clone()
     }
 
     // Not impled
@@ -865,6 +872,8 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 }
 
 pub(crate) mod sealed {
+    use core::cell::RefCell;
+
     use super::*;
 
     pub struct State {
@@ -877,6 +886,13 @@ pub(crate) mod sealed {
         pub acked: AtomicBool,
         // 0 to 7 counter
         pub msg_id: AtomicU8,
+
+        // An EPR Capabilities Message Shall have a 5V Fixed Supply PDO
+        // containing the sending Port’s information in the first object position
+        // followed by up to 10 additional PDOs.
+        // If the SPR Capabilities Message contains fewer than 7 PDOs, the unused Data Objects Shall be zero filled.
+        // EPR capabilities start at 8th(7) position
+        pub src_cap: RefCell<[u32; 11]>,
     }
 
     impl State {
@@ -887,6 +903,7 @@ pub(crate) mod sealed {
                 ack_waker: AtomicWaker::new(),
                 msg_id: AtomicU8::new(0),
                 acked: AtomicBool::new(false),
+                src_cap: RefCell::new([0; 11]),
             }
         }
 
@@ -896,6 +913,8 @@ pub(crate) mod sealed {
                 .unwrap()
         }
     }
+
+    unsafe impl Sync for State {}
 
     pub trait Instance {
         type Interrupt: interrupt::Interrupt;

@@ -402,7 +402,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         T::state().src_cap.borrow().clone()
     }
 
-    // Not impled
+    // Not supported
     pub async fn epr_keep_alive(&mut self) -> Result<(), Error> {
         let mut header = Header(0);
         header.set_spec_rev(0b10);

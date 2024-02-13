@@ -5,9 +5,7 @@ use core::task::Poll;
 
 use aligned::Aligned;
 use embassy_sync::waitqueue::AtomicWaker;
-use embassy_time::Timer;
 use embedded_hal::delay::DelayNs;
-use qingke_rt::highcode;
 
 use self::consts::{ExtendedControlType, ExtendedMessageType};
 use self::protocol::{EPRModeDataObject, PPSRequest};
@@ -238,14 +236,16 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
                 raw[i as usize * 4 + 2],
                 raw[i as usize * 4 + 3],
             ]);
-            println!("{} => {:08x}", i + 1, power_data);
-            if power_data >> 30 == 0b00 {
+            println!("{} => 0x{:08x}", i + 1, power_data);
+            if power_data == 0 {
+                println!("  Unused");
+            } else if power_data >> 30 == 0b00 {
                 let fixed_pdo = FixedPowerDataObject(power_data);
                 println!(
-                    "  Fixed Supply: {}mV {}mA, EPR: {}",
+                    "  Fixed Supply: {}mV {}mA {}",
                     fixed_pdo.voltage_50mv() * 50,
                     fixed_pdo.max_current_10ma() * 10,
-                    fixed_pdo.epr_mode_capable(),
+                    if fixed_pdo.epr_mode_capable() { "(EPR)" } else { "" },
                     // fixed_pdo.unchunked_extended_messages_supported(),
                 );
             } else if power_data >> 30 == 0b01 {
@@ -348,7 +348,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         let ext_header = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
 
         // 2 byte ext header, 2 byte padding
-        buf.extend_from_slice(&raw[4..4 + header.num_data_objs() as usize * 4 - 4])
+        buf.extend_from_slice(&raw[4..4 + header.num_data_objs() as usize * 4 - 2])
             .unwrap();
         // ref: PESinkWaitForHandleEPRChunk, PESinkHandleEPRChunk
         if header.extended() && ext_header.chunked() {
@@ -378,17 +378,16 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             let raw = self.receive_raw_packet(true).await;
 
             let header = Header(u16::from_le_bytes([raw[0], raw[1]]));
-            let ext_header = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
+            //let ext_header = ExtendedHeader(u16::from_le_bytes([raw[2], raw[3]]));
 
-            // ??? TODO, padding
-            buf.extend_from_slice(&raw[6..6 + header.num_data_objs() as usize * 4 - 4])
+            buf.extend_from_slice(&raw[4..4 + header.num_data_objs() as usize * 4 - 2])
                 .unwrap();
 
             // println!("headerXX: {:?}", header);
             //println!("ext_headerXX: {:?}", ext_header);
             //println!("raw => {:02x?}", raw);
 
-            //  self.dump_raw_pdo(&buf);
+            self.dump_raw_pdo(&buf);
 
             Ok(())
         } else {
@@ -870,12 +869,14 @@ pub(crate) mod sealed {
 
     pub struct State {
         pub rx_waker: AtomicWaker,
+        // tx end
         pub tx_waker: AtomicWaker,
-        /// ACK, GoodCRC
+        /// ack received
         pub ack_waker: AtomicWaker,
+        // sent and acked
+        pub acked: AtomicBool,
         // 0 to 7 counter
         pub msg_id: AtomicU8,
-        pub acked: AtomicBool,
     }
 
     impl State {

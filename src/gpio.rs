@@ -2,7 +2,7 @@
 //!
 //! 浮空输入
 //! 上拉输入
-//! 下拉输入（部分 IO）
+//! 下拉输入(部分 IO)
 //! 模拟输入
 //! 推挽输出
 //! 复用功能的输入和输出
@@ -284,14 +284,6 @@ impl<'d, T: Pin> Output<'d, T> {
 pub(crate) mod sealed {
     use super::*;
 
-    /// Alternate function type settings
-    #[derive(Debug, Copy, Clone)]
-    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-    pub enum AFType {
-        Input,
-        OutputPushPull,
-    }
-
     pub trait Pin {
         fn pin_port(&self) -> u8;
 
@@ -458,23 +450,6 @@ pub(crate) mod sealed {
                 }
             }
         }
-        /*
-
-        #[inline]
-        fn set_as_af_pull(&self, af_num: u8, af_type: AFType, pull: Pull) {
-            let pin = self._pin() as usize;
-            let block = self.block();
-            block.afr(pin / 8).modify(|w| w.set_afr(pin % 8, af_num));
-            match af_type {
-                AFType::Input => {}
-                AFType::OutputPushPull => block.otyper().modify(|w| w.set_ot(pin, vals::Ot::PUSHPULL)),
-                AFType::OutputOpenDrain => block.otyper().modify(|w| w.set_ot(pin, vals::Ot::OPENDRAIN)),
-            }
-            block.pupdr().modify(|w| w.set_pupdr(pin, pull.into()));
-
-            block.moder().modify(|w| w.set_moder(pin, vals::Moder::ALTERNATE));
-        }
-        */
 
         #[inline]
         fn set_as_analog(&self) {
@@ -667,7 +642,7 @@ foreach_pin!(
         impl From<peripherals::$pin_name> for AnyPin {
             fn from(x: peripherals::$pin_name) -> Self {
                 x.degrade()
-           }
+            }
         }
     };
 );

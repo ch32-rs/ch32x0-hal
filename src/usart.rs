@@ -15,7 +15,6 @@ Multiple interrupt sources
 
 use core::marker::PhantomData;
 
-use crate::gpio::sealed::Pin;
 use crate::gpio::Pull;
 use crate::{into_ref, pac, peripherals, Peripheral};
 

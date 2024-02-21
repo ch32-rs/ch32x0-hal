@@ -42,7 +42,7 @@ async fn main(spawner: Spawner) -> ! {
         led.set_low();
         Timer::after(Duration::from_millis(500)).await;
 
-        let val = adc.convert(&mut ch, &mut delay);
+        let val = adc.convert(&mut ch);
         let voltage = val as f32 / 4096.0 * 3.3 / 12.0 * (12.0 + 68.0);
 
         println!("val => {}, {:.1}V", val, voltage);

@@ -116,11 +116,11 @@ impl<'d, T: Instance> Adc<'d, T> {
     }
 
     // Get_ADC_Val
-    pub fn convert(&mut self, channel: &mut impl AdcPin<T>, delay: &mut impl DelayNs) -> u16 {
+    pub fn convert(&mut self, channel: &mut impl AdcPin<T>) -> u16 {
         T::regs().ctlr2().modify(|_, w| w.swstart().set_bit());
 
         while T::regs().statr().read().eoc().bit_is_clear() {
-            delay.delay_us(1);
+            core::hint::spin_loop();
         }
 
         (T::regs().rdatar_dr_act_dcg().read().bits() & 0xffff) as u16

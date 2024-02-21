@@ -106,14 +106,12 @@ async fn main(spawner: Spawner) -> ! {
     let caps = pd.last_capabilities();
     // println!("caps: {:?}", caps);
 
-    /*
-    for (i, &cap) in caps.iter().enumerate() {
-        if cap != 0 {
-            println!("#{}: {}", i + 1, PowerDataObject::from_u32(cap));
-        }
-    }
-    loop {}
-    */
+    //  for (i, &cap) in caps.iter().enumerate() {
+    //      if cap != 0 {
+    //          println!("#{}: {}", i + 1, PowerDataObject::from_u32(cap));
+    //      }
+    //  }
+    // loop {}
 
     //let ret = pd.request_epr_pdo(2, 0x0002d12c).await;
     //let ret = pd.request_epr_pdo(5, 0x000641f4).await;
@@ -186,7 +184,7 @@ async fn main(spawner: Spawner) -> ! {
 
         // pd.get_pps_status().await;
         // pd.epr_keep_alive().await;
-        let ret = pd.request_epr_pdo(4, caps[3]).await;
+        let ret = pd.request_epr_pdo(8, caps[7]).await;
 
         Timer::after_millis(250).await;
 
@@ -218,7 +216,7 @@ async fn main(spawner: Spawner) -> ! {
 
         // draw graph
 
-        let val = adc.convert(&mut ch, &mut delay);
+        let val = adc.convert(&mut ch);
         // val as f32 / 4096.0 * 3.3 / 12.0 * (12.0 + 68.0);
         let voltage = (val as u32) * 3300 * (12 + 120) / 4096 / 12;
 
@@ -284,7 +282,7 @@ async fn main(spawner: Spawner) -> ! {
             if cap != 0 {
                 buf.clear();
                 // println!("#{}: {}", i + 1, PowerDataObject::from_u32(cap));
-                if i + 1 == 4 {
+                if i + 1 == 8 {
                     core::write!(&mut buf, ">#{} {}", i + 1, PowerDataObject::from_u32(cap)).unwrap();
                     Text::with_alignment(buf.as_str(), Point::new(5, pos), style_item_selected, Alignment::Left)
                         .draw(&mut *display)

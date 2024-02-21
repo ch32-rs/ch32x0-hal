@@ -7,8 +7,10 @@ crate::peripherals! {
 
     ADC <= ADC,
     I2C1 <= I2C1,
-    OPA <= OPA,
     SPI1 <= SPI1,
+
+    OPA1 <= virtual,
+    OPA2 <= virtual,
 
     PIOC <= virtual,
 

@@ -22,6 +22,7 @@ pub mod adc;
 pub mod exti;
 pub mod gpio;
 pub mod i2c;
+pub mod opa;
 pub mod pioc;
 pub mod signature;
 pub mod spi;
@@ -43,6 +44,9 @@ pub fn init(config: Config) -> Peripherals {
 
     unsafe {
         gpio::init();
+
+        // unlock OPA
+        opa::init();
     }
 
     ::critical_section::with(|cs| unsafe {

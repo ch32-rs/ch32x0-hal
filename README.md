@@ -13,3 +13,8 @@ This will be the standard HAL skelton for CH32X0/CH32V003/CH32V103/CH32V20x/CH32
 - [x] UART
   - [x] Half-duplex - I need this for my personal project
   - [ ] UART async (DMA)
+- [x] SPI
+  - [x] blocking API
+  - [ ] async API
+- [ ] OPA - not tested
+- [ ] I2C - not working. First batch of CH32X035 chips doesn't have I2C

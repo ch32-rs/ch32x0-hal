@@ -648,7 +648,7 @@ foreach_pin!(
 );
 
 /// Enable the GPIO peripheral clock.
-pub unsafe fn init() {
+pub(crate) unsafe fn init() {
     let rcc = &*pac::RCC::PTR;
 
     rcc.apb2pcenr().modify(|_, w| {
@@ -661,6 +661,13 @@ pub unsafe fn init() {
             .iopcen()
             .set_bit()
     });
+}
+
+/// Disable RVSWD, use pins as GPIO
+#[inline]
+pub(crate) unsafe fn disable_software_debug_pins() {
+    let afio = &*pac::AFIO::PTR;
+    afio.pcfr1().modify(|_, w| w.sw_cfg().variant(0b100));
 }
 
 impl<'d, T: Pin> embedded_hal::digital::ErrorType for Input<'d, T> {

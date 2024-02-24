@@ -32,7 +32,7 @@ macro_rules! impl_irqs {
     }
 }
 
-impl_irqs!(USART1, USART2, USART3, USART4, USBPD);
+impl_irqs!(USART1, USART2, USART3, USART4, USBPD, PIOC);
 
 /// Interrupt handler trait.
 ///

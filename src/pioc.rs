@@ -26,6 +26,8 @@ pub struct Pioc<'d, T: Instance> {
 }
 
 impl<'d, T: Instance> Pioc<'d, T> {
+    pub const DATA: &'static [u8; ]
+
     /// Create a new driver instance.
     pub fn new<const REMAP: u8>(
         peri: impl Peripheral<P = T> + 'd,
@@ -34,9 +36,6 @@ impl<'d, T: Instance> Pioc<'d, T> {
     ) -> Self {
         into_ref!(peri, pio0, pio1);
 
-        unsafe {
-            crate::gpio::disable_software_debug_pins();
-        }
         T::enable_and_reset();
 
         pio0.set_as_af_output();
@@ -44,6 +43,62 @@ impl<'d, T: Instance> Pioc<'d, T> {
 
         Self { _peri: peri }
     }
+
+    pub fn new_pio0<const REMAP: u8>(
+        peri: impl Peripheral<P = T> + 'd,
+        pio0: impl Peripheral<P = impl Io0Pin<T, REMAP>> + 'd,
+    ) -> Self {
+        into_ref!(peri, pio0);
+
+        T::enable_and_reset();
+
+        pio0.set_as_af_output();
+
+        Self { _peri: peri }
+    }
+
+    pub fn new_pio1<const REMAP: u8>(
+        peri: impl Peripheral<P = T> + 'd,
+        pio1: impl Peripheral<P = impl Io1Pin<T, REMAP>> + 'd,
+    ) -> Self {
+        into_ref!(peri, pio1);
+
+        T::enable_and_reset();
+
+        pio1.set_as_af_output();
+
+        Self { _peri: peri }
+    }
+
+    pub fn load_and_run(&self, program: &[u8]) {
+        const PIOC_SRAM_BASE: *mut u8 = 0x20004000 as _;
+        unsafe {
+            core::ptr::copy_nonoverlapping(program.as_ptr(), PIOC_SRAM_BASE, program.len());
+        }
+
+        let regs = T::regs();
+        regs.sys_cfg()
+            .modify(|_, w| w.reset().set_bit().io_en0().set_bit().io_en1().set_bit());
+        regs.sys_cfg().modify(|_, w| w.reset().clear_bit());
+        regs.sys_cfg().modify(|_, w| w.clk_gate().set_bit());
+    }
+
+    #[inline]
+    pub fn data(&self) -> &mut [u8; 32] {
+        unsafe { &mut *((0x40026C00 +0x20)  as *mut [u8; 32]) }
+    }
+
+    #[inline]
+    pub fn data_exch(&self) -> &mut u8 {
+        unsafe { &mut *((0x40026C00 +0x1F)  as *mut u8) }
+    }
+
+    #[inline]
+    pub fn wr(&self) -> &mut u8 {
+        unsafe { &mut *((0x40026C00 +0x1E)  as *mut u8) }
+    }
+
+
 }
 
 pub(crate) mod sealed {
@@ -84,14 +139,14 @@ macro_rules! pin_trait {
 pin_trait!(Io0Pin, Instance);
 pin_trait!(Io1Pin, Instance);
 
-macro_rules! pin_trait_impl {
+macro_rules! pioc_pin_trait_impl {
     (crate::$mod:ident::$trait:ident, $instance:ident, $pin:ident, $remap:expr) => {
         impl crate::$mod::$trait<crate::peripherals::$instance, $remap> for crate::peripherals::$pin {}
     };
 }
 
-pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC18, 0);
-pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC19, 0);
+pioc_pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC18, 0);
+pioc_pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC19, 0);
 
-pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC7, 1);
-pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC19, 1);
+pioc_pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC7, 1);
+pioc_pin_trait_impl!(crate::pioc::Io0Pin, PIOC, PC19, 1);

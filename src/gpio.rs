@@ -665,8 +665,8 @@ pub(crate) unsafe fn init() {
 
 /// Disable RVSWD, use pins as GPIO
 #[inline]
-pub(crate) unsafe fn disable_software_debug_pins() {
-    let afio = &*pac::AFIO::PTR;
+pub(crate) fn disable_software_debug_pins() {
+    let afio = unsafe { &*pac::AFIO::PTR };
     afio.pcfr1().modify(|_, w| w.sw_cfg().variant(0b100));
 }
 

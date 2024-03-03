@@ -37,7 +37,9 @@ pub mod embassy;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct Config {}
+pub struct Config {
+    pub disable_swd: bool,
+}
 
 pub fn init(config: Config) -> Peripherals {
     rcc::init();
@@ -47,6 +49,10 @@ pub fn init(config: Config) -> Peripherals {
 
         // unlock OPA
         opa::init();
+    }
+
+    if config.disable_swd {
+        gpio::disable_software_debug_pins();
     }
 
     ::critical_section::with(|cs| unsafe {

@@ -219,32 +219,20 @@ impl<'d, T: Instance, Tx, Rx> Spi<'d, T, Tx, Rx> {
 
         let regs = T::regs();
 
-        regs.ctlr2().modify(|_, w| w.ssoe().clear_bit());
-        regs.ctlr1().modify(|_, w| {
-            w.cpol()
-                .bit(cpol)
-                .cpha()
-                .bit(cpha)
-                .mstr()
-                .set_bit() // master
-                .br()
-                .variant(div)
-                .spe()
-                .set_bit() // enable
-                .lsbfirst()
-                .bit(config.lsb_first())
-                .ssi()
-                .set_bit() // software ss
-                .ssm()
-                .set_bit() // soft ss
-                .crcen()
-                .clear_bit() // crc disabled
-                .bidimode()
-                .clear_bit()
-                .rxonly()
-                .bit(mosi.is_none())
-                .dff()
-                .bit(false) // u8
+        regs.ctlr2().modify(|w| w.set_ssoe(false));
+        regs.ctlr1().modify(|w| {
+            w.set_cpol(cpol);
+            w.set_cpha(cpha);
+            w.set_mstr(true);
+            w.set_br(div);
+            w.set_spe(true);
+            w.set_lsbfirst(config.lsb_first());
+            w.set_ssi(true);
+            w.set_ssm(true);
+            w.set_crcen(false);
+            w.set_bidimode(false);
+            w.set_rxonly(mosi.is_none());
+            w.set_dff(false); // u8
         });
         Self {
             _peri: peri,
@@ -260,18 +248,15 @@ impl<'d, T: Instance, Tx, Rx> Spi<'d, T, Tx, Rx> {
     fn set_word_size(&mut self, config: word_impl::Config) {
         if self.current_word_size != config {
             self.current_word_size = config;
-            T::regs().ctlr1().modify(|_, w| {
-                w.dff()
-                    .bit(config == <u16 as sealed::Word>::CONFIG)
-                    .bidimode()
-                    .bit(config == <u16 as sealed::Word>::CONFIG)
+            T::regs().ctlr1().modify(|w| {
+                w.set_dff(config == <u16 as sealed::Word>::CONFIG);
             });
         }
     }
 
     /// Blocking write.
     pub fn blocking_write<W: Word>(&mut self, words: &[W]) -> Result<(), Error> {
-        T::regs().ctlr1().modify(|_, w| w.spe().set_bit());
+        T::regs().ctlr1().modify(|w| w.set_spe(true));
         flush_rx_fifo(T::regs());
         self.set_word_size(W::CONFIG);
         for word in words.iter() {
@@ -282,7 +267,7 @@ impl<'d, T: Instance, Tx, Rx> Spi<'d, T, Tx, Rx> {
 
     /// Blocking read.
     pub fn blocking_read<W: Word>(&mut self, words: &mut [W]) -> Result<(), Error> {
-        T::regs().ctlr1().modify(|_, w| w.spe().set_bit());
+        T::regs().ctlr1().modify(|w| w.set_spe(true));
         flush_rx_fifo(T::regs());
         self.set_word_size(W::CONFIG);
         for word in words.iter_mut() {
@@ -295,7 +280,7 @@ impl<'d, T: Instance, Tx, Rx> Spi<'d, T, Tx, Rx> {
     ///
     /// This writes the contents of `data` on MOSI, and puts the received data on MISO in `data`, at the same time.
     pub fn blocking_transfer_in_place<W: Word>(&mut self, words: &mut [W]) -> Result<(), Error> {
-        T::regs().ctlr1().modify(|_, w| w.spe().bit(true));
+        T::regs().ctlr1().modify(|w| w.set_spe(true));
         flush_rx_fifo(T::regs());
         self.set_word_size(W::CONFIG);
         for word in words.iter_mut() {
@@ -311,7 +296,7 @@ impl<'d, T: Instance, Tx, Rx> Spi<'d, T, Tx, Rx> {
     /// The transfer runs for `max(read.len(), write.len())` bytes. If `read` is shorter extra bytes are ignored.
     /// If `write` is shorter it is padded with zero bytes.
     pub fn blocking_transfer<W: Word>(&mut self, read: &mut [W], write: &[W]) -> Result<(), Error> {
-        T::regs().ctlr1().modify(|_, w| w.spe().bit(true));
+        T::regs().ctlr1().modify(|w| w.set_spe(true));
         flush_rx_fifo(T::regs());
         self.set_word_size(W::CONFIG);
         let len = read.len().max(write.len());
@@ -345,41 +330,42 @@ fn calculate_clock_div(hclk: u32, clk: u32) -> u8 {
     }
 }
 
-fn check_error_flags(sr: u16) -> Result<(), Error> {
+fn check_error_flags(_sr: &pac::spi::regs::Statr) -> Result<(), Error> {
+    // TODO: implement
     Ok(())
 }
 
-fn spin_until_tx_ready(regs: &'static pac::spi1::RegisterBlock) -> Result<(), Error> {
+fn spin_until_tx_ready(regs: &'static pac::spi::Spi) -> Result<(), Error> {
     loop {
         let sr = regs.statr().read();
 
-        check_error_flags(sr.bits())?;
+        check_error_flags(&sr)?;
 
-        if sr.txe().bit_is_set() {
+        if sr.txe() {
             return Ok(());
         }
     }
 }
 
-fn spin_until_rx_ready(regs: &'static pac::spi1::RegisterBlock) -> Result<(), Error> {
+fn spin_until_rx_ready(regs: &'static pac::spi::Spi) -> Result<(), Error> {
     loop {
         let sr = regs.statr().read();
 
-        check_error_flags(sr.bits())?;
+        check_error_flags(&sr)?;
 
-        if sr.rxne().bit_is_set() {
+        if sr.rxne() {
             return Ok(());
         }
     }
 }
 
-fn flush_rx_fifo(regs: &'static pac::spi1::RegisterBlock) {
-    while regs.statr().read().rxne().bit_is_set() {
+fn flush_rx_fifo(regs: &'static pac::spi::Spi) {
+    while regs.statr().read().rxne() {
         let _ = regs.datar().read();
     }
 }
 
-fn transfer_word<W: Word>(regs: &'static pac::spi1::RegisterBlock, tx_word: W) -> Result<W, Error> {
+fn transfer_word<W: Word>(regs: &'static pac::spi::Spi, tx_word: W) -> Result<W, Error> {
     spin_until_tx_ready(regs)?;
 
     unsafe {
@@ -433,21 +419,18 @@ pub(crate) mod sealed {
     use super::*;
 
     pub trait Instance {
-        #[inline(always)]
-        fn regs() -> &'static pac::spi1::RegisterBlock {
-            unsafe { &*pac::SPI1::ptr() }
-        }
+        fn regs() -> &'static pac::spi::Spi;
 
         fn set_remap(remap: u8) {
-            let afio = unsafe { &*pac::AFIO::ptr() };
-            afio.pcfr1().modify(|_, w| w.spi1rm().variant(remap));
+            let afio = &crate::pac::AFIO;
+            afio.pcfr1().modify(|w| w.set_spi1rm(remap));
         }
 
         fn enable_and_reset() {
-            let rcc = unsafe { &*pac::RCC::ptr() };
-            rcc.apb2pcenr().modify(|_, w| w.spi1en().set_bit());
-            rcc.apb2prstr().modify(|_, w| w.spi1rst().set_bit());
-            rcc.apb2prstr().modify(|_, w| w.spi1rst().clear_bit());
+            let rcc = &crate::pac::RCC;
+            rcc.apb2pcenr().modify(|w| w.set_spi1en(true));
+            rcc.apb2prstr().modify(|w| w.set_spi1rst(true));
+            rcc.apb2prstr().modify(|w| w.set_spi1rst(false));
         }
     }
 
@@ -480,7 +463,12 @@ mod word_impl {
 /// SPI instance trait.
 pub trait Instance: Peripheral<P = Self> + sealed::Instance {}
 
-impl sealed::Instance for peripherals::SPI1 {}
+impl sealed::Instance for peripherals::SPI1 {
+    #[inline(always)]
+    fn regs() -> &'static pac::spi::Spi {
+        &crate::pac::SPI1
+    }
+}
 impl Instance for peripherals::SPI1 {}
 
 macro_rules! pin_trait {

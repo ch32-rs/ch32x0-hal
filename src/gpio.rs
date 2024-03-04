@@ -74,7 +74,7 @@ impl<'d, T: Pin> Flex<'d, T> {
 
     #[inline]
     pub fn is_low(&self) -> bool {
-        self.pin.block().indr().read().bits() & (1 << self.pin.pin()) == 0
+        self.pin.block().indr().read().idr(1 << self.pin.pin())
     }
 
     #[inline]
@@ -90,7 +90,7 @@ impl<'d, T: Pin> Flex<'d, T> {
     /// Is the output pin set as low?
     #[inline]
     pub fn is_set_low(&self) -> bool {
-        self.pin.block().outdr().read().bits() & (1 << self.pin.pin()) == 0
+        self.pin.block().outdr().read().odr(1 << self.pin.pin())
     }
 
     /// What level output is set to
@@ -297,108 +297,48 @@ pub(crate) mod sealed {
         }
 
         #[inline]
-        fn block(&self) -> &'static pac::gpioa::RegisterBlock {
-            unsafe { &*[pac::GPIOA::PTR, pac::GPIOB::PTR, pac::GPIOC::PTR][self._port() as usize] }
+        fn block(&self) -> pac::gpio::Gpio {
+            crate::pac::GPIO(self._port() as usize)
         }
 
         /// Set the output as high.
         #[inline]
         fn set_high(&self) {
-            let n = self._pin();
+            let n = self._pin() as usize;
             if n < 16 {
-                self.block().bshr().write(|w| unsafe { w.bits(1 << n) });
+                self.block().bshr().write(|w| w.set_bs(n, true));
             } else {
-                self.block().bsxr().write(|w| unsafe { w.bits(1 << (n - 16)) });
+                self.block().bsxr().write(|w| w.set_bs(n - 16, true));
             }
         }
 
         /// Set the output as low.
         #[inline]
         fn set_low(&self) {
-            let n = self._pin();
+            let n = self._pin() as usize;
             if n < 16 {
-                self.block().bshr().write(|w| unsafe { w.bits(1 << (n + 16)) });
+                self.block().bshr().write(|w| w.set_br(n, true));
             } else {
-                self.block().bsxr().write(|w| unsafe { w.bits(1 << (n - 16 + 16)) });
+                self.block().bsxr().write(|w| w.set_br(n - 16, true));
             }
         }
 
         #[inline]
         fn set_as_output(&self) {
-            let pin = self._pin() as usize;
-            let block = self.block();
+            let cnf = 0b00;
+            let mode = 0b10;
 
-            let cnf_mode = 0b00_01;
-            let shift = pin * 4 % 32;
-
-            match pin / 8 {
-                0 => {
-                    block.cfglr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                1 => {
-                    block.cfghr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                _ => {
-                    block.cfgxr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-            }
+            self.set_cnf_mode(cnf, mode);
         }
 
         #[inline]
         fn set_as_input(&self, pull: Pull) {
-            let pin = self._pin() as usize;
-            let block = self.block();
+            let cnf = if pull == Pull::None { 0b10 } else { 0b01 };
+            let mode = 0b00;
 
-            let cnf_mode = if pull == Pull::None { 0b01_00 } else { 0b10_00 };
-            let shift = pin * 4 % 32;
+            self.set_cnf_mode(cnf, mode);
 
-            match pin / 8 {
-                0 => {
-                    block.cfglr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                1 => {
-                    block.cfghr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                _ => {
-                    block.cfgxr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-            }
-
-            match pull {
-                Pull::Up => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
-                Pull::Down => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
-                _ => {}
-            }
+            self.set_pull(pull);
         }
 
         #[inline]
@@ -406,9 +346,15 @@ pub(crate) mod sealed {
             let pin = self._pin() as usize;
             let block = self.block();
 
+            // Only PA0--PA15 and PC16--PC17 support input pull-down
+
             match pull {
-                Pull::Up => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) }),
-                Pull::Down => block.outdr().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) }),
+                Pull::Up => block.outdr().modify(|w| {
+                    w.set_odr(pin, true);
+                }),
+                Pull::Down => block.outdr().modify(|w| {
+                    w.set_odr(pin, false);
+                }),
                 _ => {}
             }
         }
@@ -416,75 +362,18 @@ pub(crate) mod sealed {
         /// Only one type, alternate function + push pull
         #[inline]
         fn set_as_af_output(&self) {
-            let pin = self._pin() as usize;
-            let block = self.block();
+            let cnf = 0b10;
+            let mode = 0b01;
 
-            // 复用功能推挽输出模式(I2C 自动开漏)
-            let cnf_mode = 0b10_01;
-            let shift = pin * 4 % 32;
-
-            match pin / 8 {
-                0 => {
-                    block.cfglr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                1 => {
-                    block.cfghr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                _ => {
-                    block.cfgxr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-            }
+            self.set_cnf_mode(cnf, mode);
         }
 
         #[inline]
         fn set_as_analog(&self) {
-            let pin = self._pin() as usize;
-            let block = self.block();
+            let cnf = 0b00;
+            let mode = 0b00;
 
-            let cnf_mode = 0b00_00;
-            let shift = pin * 4 % 32;
-
-            match pin / 8 {
-                0 => {
-                    block.cfglr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                1 => {
-                    block.cfghr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-                _ => {
-                    block.cfgxr().modify(|r, w| unsafe {
-                        let mut bits = r.bits();
-                        bits &= !(0b1111 << shift);
-                        bits |= cnf_mode << shift;
-                        w.bits(bits)
-                    });
-                }
-            }
+            self.set_cnf_mode(cnf, mode);
         }
 
         /// Set the pin as "disconnected", ie doing nothing and consuming the lowest
@@ -495,6 +384,45 @@ pub(crate) mod sealed {
         #[inline]
         fn set_as_disconnected(&self) {
             self.set_as_analog();
+        }
+
+        /// MODE=00, input
+        /// CNF=00, analog
+        /// CNF=01, floating input
+        /// CNF=10, input with pull-up / pull-down
+        /// CNF=11, reserved
+        /// MODE=01, output
+        /// CNF=00, general purpose output push-pull
+        /// CNF=10, alternate function output Push-pull
+        #[inline]
+        fn set_cnf_mode(&self, cnf: u8, mode: u8) {
+            let pin = self._pin() as usize;
+            let block = self.block();
+
+            let cnf = cnf & 0b11;
+            let mode = mode & 0b11;
+
+            match pin / 8 {
+                0 => {
+                    block.cfglr().modify(|w| {
+                        w.set_cnf(pin % 8, cnf);
+                        w.set_mode(pin % 8, mode);
+                    });
+                }
+                1 => {
+                    block.cfghr().modify(|w| {
+                        w.set_cnf(pin % 8, cnf);
+                        w.set_mode(pin % 8, mode);
+                    });
+                }
+                2 => {
+                    block.cfgxr().modify(|w| {
+                        w.set_cnf(pin % 8, cnf);
+                        w.set_mode(pin % 8, mode);
+                    });
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }
@@ -649,25 +577,21 @@ foreach_pin!(
 
 /// Enable the GPIO peripheral clock.
 pub(crate) unsafe fn init() {
-    let rcc = &*pac::RCC::PTR;
+    let rcc = &crate::pac::RCC;
 
-    rcc.apb2pcenr().modify(|_, w| {
-        w.afioen()
-            .set_bit()
-            .iopaen()
-            .set_bit()
-            .iopben()
-            .set_bit()
-            .iopcen()
-            .set_bit()
+    rcc.apb2pcenr().modify(|w| {
+        w.set_afioen(true);
+        w.set_iopaen(true);
+        w.set_iopben(true);
+        w.set_iopcen(true);
     });
 }
 
 /// Disable RVSWD, use pins as GPIO
 #[inline]
 pub(crate) fn disable_software_debug_pins() {
-    let afio = unsafe { &*pac::AFIO::PTR };
-    afio.pcfr1().modify(|_, w| w.sw_cfg().variant(0b100));
+    let afio = &crate::pac::AFIO;
+    afio.pcfr1().modify(|w| w.set_sw_cfg(0b100));
 }
 
 impl<'d, T: Pin> embedded_hal::digital::ErrorType for Input<'d, T> {

@@ -18,11 +18,16 @@ async fn main(spawner: Spawner) -> ! {
     // GPIO
     let mut led = Output::new(p.PA4, Level::Low);
 
+    led.toggle();
+
     let mut cfg = usart::Config::default();
     //cfg.baudrate = 1000000;
     let mut uart = Uart::new(p.USART2, p.PA2, p.PA3, cfg).unwrap();
 
+    println!("will output to serial");
+
     uart.blocking_write(b"Init ok\r\n");
+    led.toggle();
 
     loop {
         // Timer::after_millis(2000).await;
@@ -33,10 +38,5 @@ async fn main(spawner: Spawner) -> ! {
                 uart.blocking_write(&[b]);
             }
         }
-
-        led.toggle();
-
-        //uart.blocking_write(b"Hello from serial\r\n");
-        // println!("fuck");
     }
 }

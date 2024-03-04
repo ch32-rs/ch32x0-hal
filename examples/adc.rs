@@ -15,23 +15,25 @@ async fn main(spawner: Spawner) -> ! {
     let p = hal::init(Default::default());
     hal::embassy::init();
 
-    // SPI1, remap 0
-    let cs = p.PA4;
-    let sda = p.PA7;
-    let sck = p.PA5;
+    /*
+        // SPI1, remap 0
+        let cs = p.PA4;
+        let sda = p.PA7;
+        let sck = p.PA5;
 
-    let rst = p.PA1;
-    let dc = p.PA2;
-
+        let rst = p.PA1;
+        let dc = p.PA2;
+    */
     // let vbus_div = p.PB1;
     let mut delay = Delay;
 
-    let mut adc = hal::adc::Adc::new(p.ADC, &mut delay, Default::default());
+    let mut adc = hal::adc::Adc::new(p.ADC1, &mut delay, Default::default());
 
     // let mut ch = hal::adc::Vref;
 
-    let mut ch = p.PB1;
-    adc.configure_channel(&mut ch, 1, hal::adc::SampleTime::Cycles6);
+    // let mut ch = p.PB1;
+    let mut ch = p.PA7;
+    adc.configure_channel(&mut ch, 1, hal::adc::SampleTime::Cycles11);
 
     // GPIO
     let mut led = Output::new(p.PB12, Level::Low);
@@ -43,8 +45,8 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(500)).await;
 
         let val = adc.convert(&mut ch);
-        let voltage = val as f32 / 4096.0 * 3.3 / 12.0 * (12.0 + 68.0);
+        let voltage = (val as u32) * 3300 / 4096; // 3V3 as Vref
 
-        println!("val => {}, {:.1}V", val, voltage);
+        println!("val => {}, {}mV", val, voltage);
     }
 }

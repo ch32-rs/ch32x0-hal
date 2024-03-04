@@ -213,19 +213,41 @@ where
 impl<T> sealed::Sealed for &mut T where T: sealed::Sealed {}
 
 pub(crate) mod sealed {
+    use critical_section::CriticalSection;
+
     pub trait Sealed {}
+
+    pub trait RccPeripheral {
+        // fn frequency() -> crate::time::Hertz;
+        fn enable_and_reset_with_cs(cs: CriticalSection);
+        fn disable_with_cs(cs: CriticalSection);
+
+        fn enable_and_reset() {
+            critical_section::with(|cs| Self::enable_and_reset_with_cs(cs))
+        }
+        fn disable() {
+            critical_section::with(|cs| Self::disable_with_cs(cs))
+        }
+    }
+
+    pub trait RemapPeripheral {
+        fn set_remap(remap: u8);
+    }
 }
+
+pub trait RccPeripheral: sealed::RccPeripheral + 'static {}
+pub trait RemapPeripheral: sealed::RemapPeripheral + 'static {}
 
 mod peripheral_macros {
     #[doc(hidden)]
     #[macro_export]
     macro_rules! peripherals {
-        ($($(#[$cfg:meta])? $name:ident <= $from_pac:tt),*$(,)?) => {
+        ($($(#[$cfg:meta])? $name:ident),*$(,)?) => {
 
             /// Contains the generated peripherals which implement [`Peripheral`]
             mod peripherals {
                 $(
-                    $crate::create_peripheral!($(#[$cfg])? $name <= $from_pac);
+                    $crate::create_peripheral!($(#[$cfg])? $name);
                 )*
             }
 
@@ -293,7 +315,7 @@ mod peripheral_macros {
     #[doc(hidden)]
     #[macro_export]
     macro_rules! create_peripheral {
-        ($(#[$cfg:meta])? $name:ident <= virtual) => {
+        ($(#[$cfg:meta])? $name:ident) => {
             $(#[$cfg])?
             #[derive(Debug)]
             #[allow(non_camel_case_types)]
@@ -341,14 +363,14 @@ mod peripheral_macros {
                     Self { _inner: () }
                 }
 
-                #[doc = r"Pointer to the register block"]
-                pub const PTR: *const <super::pac::$base as core::ops::Deref>::Target = super::pac::$base::PTR;
+                //#[doc = r"Pointer to the register block"]
+                //pub const PTR: *const <super::pac::$base as core::ops::Deref>::Target = super::pac::$base::PTR;
 
-                #[doc = r"Return the pointer to the register block"]
-                #[inline(always)]
-                pub const fn ptr() -> *const <super::pac::$base as core::ops::Deref>::Target {
-                    super::pac::$base::PTR
-                }
+               // #[doc = r"Return the pointer to the register block"]
+               // #[inline(always)]
+                //pub const fn ptr() -> *const <super::pac::$base as core::ops::Deref>::Target {
+                //    super::pac::$base::PTR
+               // }
             }
 
             impl core::ops::Deref for $name {

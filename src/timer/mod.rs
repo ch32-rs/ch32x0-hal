@@ -28,12 +28,12 @@ pub(crate) mod sealed {
 
         /// Start the timer.
         fn start(&mut self) {
-            Self::regs().ctlr1().modify(|_, w| w.cen().set_bit())
+            Self::regs().ctlr1().modify(| w| w.cen().set_bit())
         }
 
         /// Stop the timer.
         fn stop(&mut self) {
-            Self::regs().ctlr1().modify(|_, w| w.cen().clear_bit());
+            Self::regs().ctlr1().modify(| w| w.cen().clear_bit());
         }
 
         /// Reset the counter value to 0
@@ -62,19 +62,19 @@ pub(crate) mod sealed {
 
             // dir and cms is set later
             // TIM_ClockDivision = Div1
-            regs.ctlr1().modify(|_, w| w.ckd().variant(0b00));
+            regs.ctlr1().modify(| w| w.ckd().variant(0b00));
 
             regs.psc().write(|w| w.psc().variant(psc));
             regs.atrlr().write(|w| w.atrlr().variant(arr));
 
             // UEV 事件的源, 1=只有计数器溢出/下溢才产生更新中断或 DMA 请求
             // COUNTERONLY
-            regs.ctlr1().modify(|_, w| w.urs().variant(true));
+            regs.ctlr1().modify(| w| w.urs().variant(true));
 
             // reload immediately
             regs.swevgr().write(|w| w.ug().set_bit());
             // ANYEVENT
-            regs.ctlr1().modify(|_, w| w.urs().variant(false));
+            regs.ctlr1().modify(| w| w.urs().variant(false));
         }
 
         /// Clear update interrupt.
@@ -86,12 +86,12 @@ pub(crate) mod sealed {
 
         /// Enable/disable the update interrupt.
         fn enable_update_interrupt(&mut self, enable: bool) {
-            Self::regs().dmaintenr().modify(|_, w| w.uie().variant(enable));
+            Self::regs().dmaintenr().modify(| w| w.uie().variant(enable));
         }
 
         /// Enable/disable the update dma.
         fn enable_update_dma(&mut self, enable: bool) {
-            Self::regs().dmaintenr().modify(|_, w| w.ude().variant(enable));
+            Self::regs().dmaintenr().modify(| w| w.ude().variant(enable));
         }
 
         /// Get the update dma enable/disable state.
@@ -101,7 +101,7 @@ pub(crate) mod sealed {
 
         /// Enable/disable autoreload preload.
         fn set_autoreload_preload(&mut self, enable: bool) {
-            Self::regs().ctlr1().modify(|_, w| w.arpe().variant(enable));
+            Self::regs().ctlr1().modify(| w| w.arpe().variant(enable));
         }
 
         /// Get the timer frequency.
@@ -121,7 +121,7 @@ pub(crate) mod sealed {
         // 10 => Div4
         // 11 => reserved
         fn set_clock_division(&mut self, ckd: u8) {
-            Self::regs().ctlr1().modify(|_, w| w.ckd().variant(ckd));
+            Self::regs().ctlr1().modify(| w| w.ckd().variant(ckd));
         }
     }
 }

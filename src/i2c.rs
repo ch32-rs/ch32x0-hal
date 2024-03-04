@@ -122,8 +122,8 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
     fn init(&mut self, freq: Hertz, config: Config) {
         let regs = T::regs();
 
-        regs.ctlr1().modify(|_, w| w.swrst().set_bit());
-        regs.ctlr1().modify(|_, w| w.swrst().clear_bit());
+        regs.ctlr1().modify(| w| w.swrst().set_bit());
+        regs.ctlr1().modify(| w| w.swrst().clear_bit());
 
         let sysclk = crate::rcc::clocks().hclk.to_Hz();
         let sysclk_mhz: u32 = crate::rcc::clocks().hclk.to_MHz();
@@ -131,9 +131,9 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
 
         crate::println!("sysclk: {}MHz, i2c_clk: {}Hz", sysclk_mhz, i2c_clk);
 
-        regs.ctlr2().modify(|_, w| w.freq().variant(sysclk_mhz as u8));
+        regs.ctlr2().modify(| w| w.freq().variant(sysclk_mhz as u8));
 
-        regs.ctlr1().modify(|_, w| w.pe().clear_bit());
+        regs.ctlr1().modify(| w| w.pe().clear_bit());
 
         if freq.to_Hz() <= 100_000 {
             let tmp = (sysclk / (i2c_clk * 2)) & 0x0FFF;
@@ -159,10 +159,10 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
             });
         }
 
-        regs.ctlr1().modify(|_, w| w.pe().set_bit());
+        regs.ctlr1().modify(| w| w.pe().set_bit());
 
         // ack=0, master mode
-        regs.ctlr1().modify(|_, w| w.ack().clear_bit());
+        regs.ctlr1().modify(| w| w.ack().clear_bit());
     }
 
     fn check_and_clear_error_flags(&self) -> Result<crate::pac::i2c1::star1::R, Error> {
@@ -171,29 +171,29 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
         let star1 = T::regs().star1().read();
 
         if star1.pecerr().bit() {
-            T::regs().star1().modify(|_, w| w.pecerr().clear_bit());
+            T::regs().star1().modify(| w| w.pecerr().clear_bit());
             return Err(Error::Crc);
         }
 
         if star1.ovr().bit() {
-            T::regs().star1().modify(|_, w| w.ovr().clear_bit());
+            T::regs().star1().modify(| w| w.ovr().clear_bit());
             return Err(Error::Overrun);
         }
 
         if star1.af().bit() {
-            T::regs().star1().modify(|_, w| w.af().clear_bit());
+            T::regs().star1().modify(| w| w.af().clear_bit());
             return Err(Error::Nack);
         }
 
         if star1.arlo().bit() {
-            T::regs().star1().modify(|_, w| w.arlo().clear_bit());
+            T::regs().star1().modify(| w| w.arlo().clear_bit());
             return Err(Error::Arbitration);
         }
 
         // The errata indicates that BERR may be incorrectly detected. It recommends ignoring and
         // clearing the BERR bit instead.
         if star1.berr().bit() {
-            T::regs().star1().modify(|_, w| w.berr().clear_bit());
+            T::regs().star1().modify(| w| w.berr().clear_bit());
         }
 
         Ok(star1)
@@ -208,7 +208,7 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
         // Send a START condition
         let rb = T::regs();
 
-        rb.ctlr1().modify(|_, w| w.start().set_bit());
+        rb.ctlr1().modify(| w| w.start().set_bit());
 
         // Wait until START condition was generated
         while !self.check_and_clear_error_flags()?.sb().bit() {
@@ -291,7 +291,7 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
     ) -> Result<(), Error> {
         if let Some((last, buffer)) = buffer.split_last_mut() {
             // Send a START condition and set ACK bit
-            T::regs().ctlr1().modify(|_, w| w.start().set_bit().ack().set_bit());
+            T::regs().ctlr1().modify(| w| w.start().set_bit().ack().set_bit());
 
             // Wait until START condition was generated
             while !self.check_and_clear_error_flags()?.sb().bit() {
@@ -324,7 +324,7 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
             }
 
             // Prepare to send NACK then STOP after next byte
-            T::regs().ctlr1().modify(|_, w| w.ack().clear_bit().stop().set_bit());
+            T::regs().ctlr1().modify(| w| w.ack().clear_bit().stop().set_bit());
 
             // Receive last byte
             *last = self.recv_byte(&check_timeout)?;
@@ -353,7 +353,7 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
     ) -> Result<(), Error> {
         self.write_bytes(addr, write, &check_timeout)?;
         // Send a STOP condition
-        T::regs().ctlr1().modify(|_, w| w.stop().set_bit());
+        T::regs().ctlr1().modify(| w| w.stop().set_bit());
         // Wait for STOP condition to transmit.
         while T::regs().ctlr1().read().stop().bit() {
             check_timeout()?;
@@ -387,7 +387,7 @@ impl<'d, T: Instance, TXDMA, RXDMA> I2c<'d, T, TXDMA, RXDMA> {
 
 impl<'d, T: Instance, TXDMA, RXDMA> Drop for I2c<'d, T, TXDMA, RXDMA> {
     fn drop(&mut self) {
-        T::regs().ctlr1().modify(|_, w| w.pe().clear_bit());
+        T::regs().ctlr1().modify(| w| w.pe().clear_bit());
     }
 }
 
@@ -419,15 +419,15 @@ impl sealed::Instance for peripherals::I2C1 {
     fn set_remap(remap: u8) {
         let afio = unsafe { &*pac::AFIO::PTR };
 
-        afio.pcfr1().modify(|_, w| w.i2c1rm().variant(remap));
+        afio.pcfr1().modify(| w| w.i2c1rm().variant(remap));
     }
 
     fn enable_and_reset() {
         let rcc = unsafe { &*pac::RCC::PTR };
 
-        rcc.apb1pcenr().modify(|_, w| w.i2c1en().set_bit());
-        rcc.apb1prstr().modify(|_, w| w.i2c1rst().set_bit());
-        rcc.apb1prstr().modify(|_, w| w.i2c1rst().clear_bit());
+        rcc.apb1pcenr().modify(| w| w.i2c1en().set_bit());
+        rcc.apb1prstr().modify(| w| w.i2c1rst().set_bit());
+        rcc.apb1prstr().modify(| w| w.i2c1rst().clear_bit());
     }
 }
 impl Instance for peripherals::I2C1 {}

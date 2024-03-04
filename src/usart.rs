@@ -131,8 +131,8 @@ impl<'d, T: Instance> UartTx<'d, T> {
         let rb = T::regs();
 
         for &c in buffer {
-            while rb.statr().read().tc().bit_is_clear() {} // wait tx complete
-            rb.datar().write(|w| unsafe { w.dr().bits(c as u16) });
+            while !rb.statr().read().tc() {} // wait tx complete
+            rb.datar().write(|w| w.set_dr(c as u16));
         }
         Ok(())
     }
@@ -140,7 +140,7 @@ impl<'d, T: Instance> UartTx<'d, T> {
     pub fn blocking_flush(&mut self) -> Result<(), Error> {
         let rb = T::regs();
 
-        while rb.statr().read().txe().bit_is_clear() {} // wait txe
+        while !rb.statr().read().txe() {} // wait tx ends
         Ok(())
     }
 }
@@ -181,11 +181,10 @@ impl<'d, T: Instance> UartRx<'d, T> {
     pub fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
         let rb = T::regs();
 
-        // while rb.statr().read().rxne().bit_is_clear() {} // wait rxne
-        if rb.statr().read().rxne().bit_is_clear() {
+        if !rb.statr().read().rxne() {
             Err(nb::Error::WouldBlock)
         } else {
-            Ok(rb.datar().read().dr().bits() as u8) // FIXME: how to handle 9 bits
+            Ok(rb.datar().read().dr() as u8) // FIXME: how to handle 9 bits
         }
     }
 
@@ -193,8 +192,8 @@ impl<'d, T: Instance> UartRx<'d, T> {
         let rb = T::regs();
 
         for c in buffer {
-            while rb.statr().read().rxne().bit_is_clear() {} // wait rxne
-            *c = rb.datar().read().dr().bits() as u8; // FIXME: how to handle 9 bits
+            while !rb.statr().read().rxne() {} // wait rxne
+            *c = rb.datar().read().dr() as u8; // FIXME: how to handle 9 bits
         }
         Ok(())
     }
@@ -237,9 +236,9 @@ impl<'d, T: Instance> Uart<'d, T> {
         let rb = T::regs();
         configure(rb, &config, true, true)?;
 
-        rb.ctlr3().modify(|_, w| w.hdsel().set_bit()); // half duplex
+        rb.ctlr3().modify(|w| w.set_hdsel(true)); // half duplex
 
-        rb.statr().modify(|_, w| w.rxne().clear_bit()); // clear rxne
+        rb.statr().modify(|w| w.set_rxne(false)); // clear rxne
         let _ = rb.datar().read().dr(); // clear rxne
 
         Ok(Self {
@@ -277,8 +276,8 @@ impl<'d, T: Instance> Uart<'d, T> {
         let rb = T::regs();
 
         for &c in buffer {
-            while rb.statr().read().txe().bit_is_clear() {} // wait tx complete
-            rb.datar().write(|w| unsafe { w.dr().bits(c as u16) });
+            while !rb.statr().read().txe() {} // wait tx complete
+            rb.datar().write(|w| w.set_dr(c as u16));
         }
         Ok(())
     }
@@ -302,39 +301,23 @@ pub(crate) mod sealed {
     pub trait Instance {
         type Interrupt: interrupt::Interrupt;
 
-        fn regs() -> &'static pac::usart1::RegisterBlock;
-
-        fn enable_and_reset();
-        // fn state() -> &'static ();
-
-        // remap for USART1 to USART4
-        fn set_remap(remap: u8);
+        fn regs() -> &'static pac::usart::Usart;
     }
 }
 
-fn configure(
-    rb: &pac::usart1::RegisterBlock,
-    config: &Config,
-    enable_tx: bool,
-    enable_rx: bool,
-) -> Result<(), ConfigError> {
+fn configure(rb: &pac::usart::Usart, config: &Config, enable_tx: bool, enable_rx: bool) -> Result<(), ConfigError> {
     if !enable_rx && !enable_tx {
         panic!("USART: At least one of RX or TX should be enabled");
     }
 
-    rb.ctlr2().modify(|_, w| w.stop().variant(config.stop_bits as u8));
+    rb.ctlr2().modify(|w| w.set_stop(config.stop_bits as u8));
 
-    rb.ctlr1().modify(|_, w| {
-        w.m()
-            .variant(config.data_bits as u8 != 0)
-            .pce()
-            .variant(config.parity != Parity::ParityNone)
-            .ps()
-            .variant(config.parity == Parity::ParityOdd) // 1 for odd parity, 0 for even parity
-            .te()
-            .bit(enable_tx)
-            .re()
-            .bit(enable_rx)
+    rb.ctlr1().modify(|w| {
+        w.set_m(config.data_bits as u8 != 0);
+        w.set_pce(config.parity != Parity::ParityNone);
+        w.set_ps(config.parity == Parity::ParityOdd); // 1 for odd parity, 0 for even parity
+        w.set_te(enable_tx);
+        w.set_re(enable_rx);
     });
 
     // HCLK/(16*USARTDIV)
@@ -348,54 +331,48 @@ fn configure(
     let div_f = div_m - 100 * (tmpreg >> 4);
     tmpreg |= ((div_f * 16 + 50) / 100) & 0x0F;
 
-    rb.brr().write(|w| unsafe { w.bits(tmpreg) });
+    rb.brr().write(|w| w.0 = tmpreg);
 
     // enable uart
-    rb.ctlr1().modify(|_, w| w.ue().set_bit());
+    rb.ctlr1().modify(|w| w.set_ue(true));
 
     Ok(())
 }
 
-// embedded-hal
+// embedded-halpm
 mod eh1 {
     use super::*;
 }
 
 // Peripheral traits
 
-pub trait Instance: Peripheral<P = Self> + sealed::Instance + 'static + Send {}
+pub trait Instance:
+    Peripheral<P = Self>
+    + sealed::Instance
+    + crate::peripheral::RccPeripheral
+    + crate::peripheral::RemapPeripheral
+    + 'static
+    + Send
+{
+}
 
 macro_rules! impl_uart {
-    ($inst:ident, $irq:ident, $rst_reg:ident, $rst_field:ident, $en_reg:ident, $en_field:ident, $remap_field:ident) => {
+    ($inst:ident, $irq:ident) => {
         impl sealed::Instance for crate::peripherals::$inst {
             type Interrupt = crate::interrupt::$irq;
 
-            fn regs() -> &'static crate::pac::usart1::RegisterBlock {
-                unsafe { &*crate::pac::$inst::PTR }
-            }
-
-            fn enable_and_reset() {
-                let rcc = unsafe { &*crate::pac::RCC::PTR };
-
-                rcc.$rst_reg().modify(|_, w| w.$rst_field().set_bit());
-                rcc.$rst_reg().modify(|_, w| w.$rst_field().clear_bit());
-                rcc.$en_reg().modify(|_, w| w.$en_field().set_bit());
-            }
-
-            fn set_remap(remap: u8) {
-                let afio = unsafe { &*pac::AFIO::PTR };
-                afio.pcfr1().modify(|_, w| w.$remap_field().variant(remap));
+            fn regs() -> &'static crate::pac::usart::Usart {
+                &crate::pac::$inst
             }
         }
-
         impl Instance for peripherals::$inst {}
     };
 }
 
-impl_uart!(USART1, USART1, apb2prstr, usart1rst, apb2pcenr, usart1en, usart1rm);
-impl_uart!(USART2, USART2, apb1prstr, usart2rst, apb1pcenr, usart2en, usart2rm);
-impl_uart!(USART3, USART3, apb1prstr, usart3rst, apb1pcenr, usart3en, usart3rm);
-impl_uart!(USART4, USART4, apb1prstr, usart4rst, apb1pcenr, uart4en, usart4rm); // TODO: rename in PAC
+impl_uart!(USART1, USART1);
+impl_uart!(USART2, USART2);
+impl_uart!(USART3, USART3);
+impl_uart!(USART4, USART4);
 
 macro_rules! pin_trait {
     ($signal:ident, $instance:path) => {

@@ -1,8 +1,11 @@
 #![no_std]
+#![allow(static_mut_refs)]
 
-pub use ch32x0::ch32x035 as pac;
+pub use ch32_metapac as pac;
 
 // pub mod rt;
+
+mod traits;
 
 pub mod rcc;
 
@@ -21,19 +24,29 @@ pub mod dma;
 pub mod adc;
 pub mod exti;
 pub mod gpio;
-pub mod i2c;
+// pub mod i2c;
 pub mod opa;
-pub mod pioc;
+// pub mod pioc;
 pub mod signature;
 pub mod spi;
-pub mod timer;
+// pub mod timer;
 pub mod usart;
-pub mod usbpd;
-
-mod traits;
+// pub mod usbpd;
 
 #[cfg(feature = "embassy")]
 pub mod embassy;
+
+// This must go last, so that it sees all the impl_foo! macros defined earlier.
+pub(crate) mod _generated {
+    #![allow(dead_code)]
+    #![allow(unused_imports)]
+    #![allow(non_snake_case)]
+    #![allow(missing_docs)]
+
+    use super::peripherals;
+
+    include!(concat!(env!("OUT_DIR"), "/_generated.rs"));
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

@@ -51,7 +51,7 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
         let usbpd = T::regs();
 
         if usbpd.status().read().if_rx_act().bit_is_set() {
-            usbpd.status().modify(|_, w| w.if_rx_act().set_bit()); // clear IF_RX_ACT
+            usbpd.status().modify(| w| w.if_rx_act().set_bit()); // clear IF_RX_ACT
 
             match usbpd.status().read().bmc_aux().bits() {
                 PD_SOP0 => {
@@ -61,7 +61,7 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
                         let header = Header(u16::from_le_bytes([PD_RX_BUF[0], PD_RX_BUF[1]]));
                         // 2 byte header + 4 byte CRC32
                         if len == 6 && header.msg_type() == consts::DEF_TYPE_GOODCRC {
-                            usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit());
+                            usbpd.config().modify(| w| w.ie_rx_act().clear_bit());
 
                             qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
                             //                            T::state().msg_id.store(header.msg_id(), Ordering::Relaxed);
@@ -69,7 +69,7 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
                             T::state().acked.store(true, Ordering::Relaxed);
                             T::state().ack_waker.wake(); // notifiy GoodCRC received
                         } else {
-                            usbpd.config().modify(|_, w| w.ie_rx_act().clear_bit());
+                            usbpd.config().modify(| w| w.ie_rx_act().clear_bit());
 
                             qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
@@ -93,19 +93,19 @@ impl<T: Instance> interrupt::Handler<T::Interrupt> for InterruptHandler<T> {
 
         // sending done
         if usbpd.status().read().if_tx_end().bit_is_set() {
-            usbpd.port_cc1().modify(|_, w| w.cc_lve().clear_bit());
-            usbpd.port_cc2().modify(|_, w| w.cc_lve().clear_bit());
+            usbpd.port_cc1().modify(| w| w.cc_lve().clear_bit());
+            usbpd.port_cc2().modify(| w| w.cc_lve().clear_bit());
 
             qingke::pfic::disable_interrupt(Interrupt::USBPD as u8);
 
-            usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
-            usbpd.config().modify(|_, w| w.ie_tx_end().clear_bit()); // set flag, triggered
+            usbpd.status().modify(| w| w.if_tx_end().set_bit()); // clear IF_TX_END
+            usbpd.config().modify(| w| w.ie_tx_end().clear_bit()); // set flag, triggered
 
             T::state().tx_waker.wake();
         }
 
         if usbpd.status().read().if_rx_reset().bit_is_set() {
-            usbpd.status().modify(|_, w| w.if_rx_reset().set_bit()); // clear IF_RX_RESET
+            usbpd.status().modify(| w| w.if_rx_reset().set_bit()); // clear IF_RX_RESET
 
             // reset
             // usbpd.set_rx_mode();
@@ -139,7 +139,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         // PD 引脚 PC14/PC15 高阈值输入模式
         // PD 收发器 PHY 上拉限幅配置位: USBPD_PHY_V33
         afio.ctlr()
-            .modify(|_, w| w.usbpd_in_hvt().set_bit().usbpd_phy_v33().set_bit());
+            .modify(| w| w.usbpd_in_hvt().set_bit().usbpd_phy_v33().set_bit());
 
         T::regs().config().write(|w| w.pd_dma_en().set_bit());
         T::regs().status().write(|w| {
@@ -170,19 +170,19 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
     fn set_rx_mode(&mut self) {
         let usbpd = T::regs();
 
-        usbpd.config().modify(|_, w| w.pd_all_clr().set_bit());
-        usbpd.config().modify(|_, w| w.pd_all_clr().clear_bit());
+        usbpd.config().modify(| w| w.pd_all_clr().set_bit());
+        usbpd.config().modify(| w| w.pd_all_clr().clear_bit());
 
         usbpd
             .dma()
             .write(|w| unsafe { w.bits(((PD_RX_BUF.as_mut_ptr() as u32) & 0xFFFF) as u16) });
 
-        usbpd.control().modify(|_, w| w.pd_tx_en().clear_bit()); // rx_en
+        usbpd.control().modify(| w| w.pd_tx_en().clear_bit()); // rx_en
 
         usbpd
             .bmc_clk_cnt()
             .write(|w| unsafe { w.bmc_clk_cnt().bits(get_bmc_clk_for_rx()) });
-        usbpd.control().modify(|_, w| w.bmc_start().set_bit());
+        usbpd.control().modify(| w| w.bmc_start().set_bit());
     }
 
     // 0, 1, 2
@@ -190,19 +190,19 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         let usbpd = T::regs();
 
         // CH32X035 has no internal CC pull down support
-        usbpd.port_cc1().modify(|_, w| w.cc_ce().v0_22());
+        usbpd.port_cc1().modify(| w| w.cc_ce().v0_22());
         SystickDelay.delay_us(2);
         // test if > 0.22V
         if usbpd.port_cc1().read().pa_cc_ai().bit_is_set() {
             // cc1 is connected
-            usbpd.config().modify(|_, w| w.cc_sel().cc1());
+            usbpd.config().modify(| w| w.cc_sel().cc1());
             return 1;
         } else {
-            usbpd.port_cc2().modify(|_, w| w.cc_ce().v0_22());
+            usbpd.port_cc2().modify(| w| w.cc_ce().v0_22());
             SystickDelay.delay_us(2);
             if usbpd.port_cc2().read().pa_cc_ai().bit_is_set() {
                 // cc2 is connected
-                usbpd.config().modify(|_, w| w.cc_sel().cc2());
+                usbpd.config().modify(| w| w.cc_sel().cc2());
                 return 2;
             } else {
                 // no cc is connected
@@ -536,7 +536,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         usbpd
             .config()
-            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
+            .modify(| w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
         unsafe { qingke::pfic::disable_interrupt(Interrupt::USBPD as u8) };
         unsafe {
             self.blocking_send(consts::UPD_SOP0, &PD_TX_BUF[..2]);
@@ -670,7 +670,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         }
         usbpd
             .config()
-            .modify(|_, w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().ie_tx_end().clear_bit());
+            .modify(| w| w.ie_rx_act().set_bit().ie_rx_reset().set_bit().ie_tx_end().clear_bit());
         unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
         compiler_fence(Ordering::SeqCst);
 
@@ -702,7 +702,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         self.blocking_send(sop, buf);
 
         // wait for googd crc
-        usbpd.config().modify(|_, w| w.ie_rx_act().set_bit());
+        usbpd.config().modify(| w| w.ie_rx_act().set_bit());
         T::state().acked.store(false, Ordering::Relaxed);
         self.set_rx_mode();
         unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
@@ -740,12 +740,12 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         unsafe { qingke::pfic::disable_interrupt(Interrupt::USBPD as u8) };
         usbpd
             .config()
-            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
+            .modify(| w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
 
         if usbpd.config().read().cc_sel().is_cc1() {
-            usbpd.port_cc1().modify(|_, w| w.cc_lve().set_bit());
+            usbpd.port_cc1().modify(| w| w.cc_lve().set_bit());
         } else {
-            usbpd.port_cc2().modify(|_, w| w.cc_lve().set_bit());
+            usbpd.port_cc2().modify(| w| w.cc_lve().set_bit());
         }
 
         usbpd
@@ -761,19 +761,19 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             .bmc_tx_sz()
             .write(|w| unsafe { w.bmc_tx_sz().bits(buf.len() as _) });
 
-        usbpd.control().modify(|_, w| w.pd_tx_en().set_bit()); // tx
+        usbpd.control().modify(| w| w.pd_tx_en().set_bit()); // tx
         usbpd.status().write(|w| unsafe { w.bits(0) });
 
-        usbpd.control().modify(|_, w| w.bmc_start().set_bit());
+        usbpd.control().modify(| w| w.bmc_start().set_bit());
 
         // await
         while usbpd.status().read().if_tx_end().bit_is_clear() {}
-        usbpd.status().modify(|_, w| w.if_tx_end().set_bit()); // clear IF_TX_END
+        usbpd.status().modify(| w| w.if_tx_end().set_bit()); // clear IF_TX_END
 
         if usbpd.config().read().cc_sel().is_cc1() {
-            usbpd.port_cc1().modify(|_, w| w.cc_lve().clear_bit());
+            usbpd.port_cc1().modify(| w| w.cc_lve().clear_bit());
         } else {
-            usbpd.port_cc2().modify(|_, w| w.cc_lve().clear_bit());
+            usbpd.port_cc2().modify(| w| w.cc_lve().clear_bit());
         }
     }
 
@@ -781,9 +781,9 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         let usbpd = unsafe { &*pac::USBPD::PTR };
 
         if usbpd.config().read().cc_sel().is_cc1() {
-            usbpd.port_cc1().modify(|_, w| w.cc_lve().set_bit());
+            usbpd.port_cc1().modify(| w| w.cc_lve().set_bit());
         } else {
-            usbpd.port_cc2().modify(|_, w| w.cc_lve().set_bit());
+            usbpd.port_cc2().modify(| w| w.cc_lve().set_bit());
         }
 
         usbpd
@@ -799,22 +799,22 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
             .bmc_tx_sz()
             .write(|w| unsafe { w.bmc_tx_sz().bits(buf.len() as _) });
 
-        usbpd.control().modify(|_, w| w.pd_tx_en().set_bit()); // tx
+        usbpd.control().modify(| w| w.pd_tx_en().set_bit()); // tx
         usbpd.status().write(|w| unsafe { w.bits(0) }); // clear bmc aux status
 
         // println!("fuck why {}", usbpd.status().read().bits());
         SystickDelay.delay_us(300); // required for timing. no idea why
 
-        usbpd.control().modify(|_, w| w.bmc_start().set_bit());
+        usbpd.control().modify(| w| w.bmc_start().set_bit());
     }
 
     fn send_phy_empty_playload(&mut self, sop: u8) {
         let usbpd = T::regs();
 
         if usbpd.config().read().cc_sel().is_cc1() {
-            usbpd.port_cc1().modify(|_, w| w.cc_lve().set_bit());
+            usbpd.port_cc1().modify(| w| w.cc_lve().set_bit());
         } else {
-            usbpd.port_cc2().modify(|_, w| w.cc_lve().set_bit());
+            usbpd.port_cc2().modify(| w| w.cc_lve().set_bit());
         }
 
         usbpd
@@ -826,13 +826,13 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
         usbpd.tx_sel().write(|w| unsafe { w.bits(sop) });
 
         usbpd.bmc_tx_sz().write(|w| unsafe { w.bmc_tx_sz().bits(0) }); // len = 0
-        usbpd.control().modify(|_, w| w.pd_tx_en().set_bit()); // tx mode
+        usbpd.control().modify(| w| w.pd_tx_en().set_bit()); // tx mode
 
         usbpd.status().write(|w| unsafe { w.bits(0b11111100) }); // clear bmc aux status
-                                                                 // rb.config.modify(|_, w| w.pd_all_clr().set_bit());
-                                                                 //rb.config.modify(|_, w| w.pd_all_clr().clear_bit());
+                                                                 // rb.config.modify(| w| w.pd_all_clr().set_bit());
+                                                                 //rb.config.modify(| w| w.pd_all_clr().clear_bit());
 
-        usbpd.control().modify(|_, w| w.bmc_start().set_bit());
+        usbpd.control().modify(| w| w.bmc_start().set_bit());
     }
 
     async fn ack_goodcrc(&mut self, msg_id: u8) {
@@ -851,7 +851,7 @@ impl<'d, T: Instance> UsbPdSink<'d, T> {
 
         usbpd
             .config()
-            .modify(|_, w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
+            .modify(| w| w.ie_tx_end().set_bit().ie_rx_act().clear_bit()); // enable tx_end irq
         unsafe { qingke::pfic::enable_interrupt(Interrupt::USBPD as u8) };
         compiler_fence(Ordering::SeqCst);
         unsafe {
@@ -928,9 +928,9 @@ pub(crate) mod sealed {
 
         fn enable_and_reset() {
             let rcc = unsafe { &*pac::RCC::ptr() };
-            rcc.ahbpcenr().modify(|_, w| w.usbpd().set_bit());
-            rcc.ahbrstr().modify(|_, w| w.usbpdrst().set_bit());
-            rcc.ahbrstr().modify(|_, w| w.usbpdrst().clear_bit());
+            rcc.ahbpcenr().modify(| w| w.usbpd().set_bit());
+            rcc.ahbrstr().modify(| w| w.usbpdrst().set_bit());
+            rcc.ahbrstr().modify(| w| w.usbpdrst().clear_bit());
         }
     }
 }

@@ -4,10 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ch32x0 = { version = "0.1.6", features = [
-    "ch32x035",
+#ch32x0 = { version = "0.1.6", features = [
+#    "ch32x035",
+#    "rt",
+#], path = "../ch32-rs-nightlies/ch32x0" }
+
+ch32-metapac = { version = "0.0.2", features = [
+    "ch32x035f7p6",
+    "memory-x",
     "rt",
-], path = "../ch32-rs-nightlies/ch32x0" }
+], path = "../ch32-data/build/ch32-metapac" }
+
+
 qingke = { version = "0.1.5", path = "../qingke", features = [
     "critical-section-impl",
 ] }
@@ -33,6 +41,14 @@ nb = "1.1.0"
 embedded-hal-nb = "1.0.0"
 bitfield = "0.14.0"
 heapless = "0.8.0"
+
+[build-dependencies]
+ch32-metapac = { version = "0.0.2", features = [
+    "ch32x035f7p6",
+    "metadata",
+], path = "../ch32-data/build/ch32-metapac" }
+proc-macro2 = "1.0.78"
+quote = "1.0"
 
 [features]
 default = ["ch32x035f8u6", "embassy"]

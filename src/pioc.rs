@@ -78,9 +78,9 @@ impl<'d, T: Instance> Pioc<'d, T> {
 
         let regs = T::regs();
         regs.sys_cfg()
-            .modify(|_, w| w.reset().set_bit().io_en0().set_bit().io_en1().set_bit());
-        regs.sys_cfg().modify(|_, w| w.reset().clear_bit());
-        regs.sys_cfg().modify(|_, w| w.clk_gate().set_bit());
+            .modify(| w| w.reset().set_bit().io_en0().set_bit().io_en1().set_bit());
+        regs.sys_cfg().modify(| w| w.reset().clear_bit());
+        regs.sys_cfg().modify(| w| w.clk_gate().set_bit());
     }
 
     #[inline]
@@ -116,7 +116,7 @@ pub(crate) mod sealed {
 
         fn set_remap(remap: u8) {
             let afio = unsafe { &*pac::AFIO::ptr() };
-            afio.pcfr1().modify(|_, w| w.ploc_rm().bit(remap != 0));
+            afio.pcfr1().modify(| w| w.ploc_rm().bit(remap != 0));
         }
     }
 }

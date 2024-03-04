@@ -1,7 +1,5 @@
 use fugit::HertzU32 as Hertz;
 
-use crate::pac;
-
 const HSI_FREQUENCY: Hertz = Hertz::from_raw(48_000_000);
 
 // Power on default: HPRE = 0b0101 = Div6
@@ -26,16 +24,16 @@ pub fn clocks() -> &'static Clocks {
 }
 
 pub(crate) fn init() {
-    let flash = unsafe { &*pac::FLASH::PTR };
-    let rcc = unsafe { &*pac::RCC::PTR };
+    let flash = &crate::pac::FLASH;
+    let rcc = &crate::pac::RCC;
 
     // SystemInit
-    rcc.ctlr().modify(|_, w| w.hsion().set_bit());
+    rcc.ctlr().modify(|w| w.set_hsion(true));
 
-    flash.actlr().modify(|_, w| w.latency().variant(0b10)); // 2 等待（24MHz<HCLK<=48MHz）
+    flash.actlr().modify(|w| w.set_latency(0b10)); // 2 等待（24MHz<HCLK<=48MHz）
 
     // set hckl = sysclk = APB1
-    rcc.cfgr0().modify(|_, w| w.hpre().variant(0));
+    rcc.cfgr0().modify(|w| w.set_hpre(0));
 
     unsafe {
         CLOCKS = Clocks {

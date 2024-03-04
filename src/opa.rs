@@ -13,6 +13,7 @@ CMP输入引脚可选择 负端输入通道可选公用引脚
 CMP输出引脚可选择通用I/O口或TIM内部采样通道
 1个中断向量
 */
+use crate::gpio::Pull;
 use crate::{into_ref, pac, peripherals, Peripheral, PeripheralRef};
 
 /// Gain for no external inverting input(wired to GND)
@@ -64,7 +65,8 @@ impl<'d, T: Instance> OpAmp<'d, T> {
     ) -> OpAmpOutput<'d, T> {
         into_ref!(in_pin);
         into_ref!(out_pin);
-        in_pin.set_as_analog();
+
+        in_pin.set_as_input(Pull::None);
         out_pin.set_as_analog();
 
         T::setup_input_output(in_pin.raw(), gain as u8, true, out_pin.raw());
@@ -84,15 +86,16 @@ impl<'d, T: Instance> OpAmp<'d, T> {
         into_ref!(in_pin_positive);
         into_ref!(in_pin_negative);
         into_ref!(out_pin);
-        in_pin_positive.set_as_analog();
-        in_pin_negative.set_as_analog();
+
+        in_pin_positive.set_as_input(Pull::None);
+        in_pin_negative.set_as_input(Pull::None);
         out_pin.set_as_analog();
 
         T::setup_input_output(in_pin_positive.raw(), in_pin_negative.raw(), false, out_pin.raw());
 
         T::set_enable(true);
 
-        todo!()
+        OpAmpOutput { _inner: self }
     }
 }
 
@@ -107,6 +110,10 @@ pub trait Instance: sealed::Instance + 'static {}
 
 pub(crate) mod sealed {
     pub trait Instance {
+        fn regs() -> &'static crate::pac::opa::Opa {
+            &crate::pac::OPA
+        }
+
         fn set_enable(enable: bool);
 
         fn setup_input_output(psel: u8, nsel: u8, enbale_fb: bool, outsel: u8);
@@ -135,23 +142,15 @@ pub trait OutputPin<T: Instance>: sealed::OutputPin<T> {}
 impl Instance for peripherals::OPA1 {}
 impl sealed::Instance for peripherals::OPA1 {
     fn set_enable(enable: bool) {
-        let regs = unsafe { &*pac::OPA::ptr() };
-
-        regs.ctlr1().modify(|_, w| w.en1().bit(enable));
+        Self::regs().ctlr1().modify(|w| w.set_en1(enable));
     }
 
     fn setup_input_output(psel: u8, nsel: u8, enbale_fb: bool, outsel: u8) {
-        let regs = unsafe { &*pac::OPA::ptr() };
-
-        regs.ctlr1().modify(|_, w| {
-            w.psel1()
-                .variant(psel)
-                .nsel1()
-                .variant(nsel)
-                .fb_en1()
-                .bit(enbale_fb)
-                .mode1()
-                .variant(outsel != 0)
+        Self::regs().ctlr1().modify(|w| {
+            w.set_psel1(psel);
+            w.set_nsel1(nsel);
+            w.set_fb_en1(enbale_fb);
+            w.set_mode1(outsel != 0);
         });
     }
 }
@@ -159,23 +158,15 @@ impl sealed::Instance for peripherals::OPA1 {
 impl Instance for peripherals::OPA2 {}
 impl sealed::Instance for peripherals::OPA2 {
     fn set_enable(enable: bool) {
-        let regs = unsafe { &*pac::OPA::ptr() };
-
-        regs.ctlr1().modify(|_, w| w.en2().bit(enable));
+        Self::regs().ctlr1().modify(|w| w.set_en2(enable));
     }
 
     fn setup_input_output(psel: u8, nsel: u8, enbale_fb: bool, outsel: u8) {
-        let regs = unsafe { &*pac::OPA::ptr() };
-
-        regs.ctlr1().modify(|_, w| {
-            w.psel2()
-                .variant(psel)
-                .nsel2()
-                .variant(nsel)
-                .fb_en2()
-                .bit(enbale_fb)
-                .mode2()
-                .variant(outsel != 0)
+        Self::regs().ctlr1().modify(|w| {
+            w.set_psel2(psel);
+            w.set_nsel2(nsel);
+            w.set_fb_en2(enbale_fb);
+            w.set_mode2(outsel != 0);
         });
     }
 }
@@ -216,7 +207,7 @@ impl_opa_pin!(OPA2, OutputPin, PA2, 1);
 
 pub(crate) unsafe fn init() {
     // Unlock OPA
-    let regs = &*pac::OPA::ptr();
-    regs.opa_key().write(|w| w.bits(0x45670123));
-    regs.opa_key().write(|w| w.bits(0xCDEF89AB));
+    let regs = &crate::pac::OPA;
+    regs.opa_key().write(|w| w.0 = 0x45670123);
+    regs.opa_key().write(|w| w.0 = 0xCDEF89AB);
 }

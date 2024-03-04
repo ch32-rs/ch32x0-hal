@@ -13,14 +13,14 @@ const NEW_AW: AtomicWaker = AtomicWaker::new();
 static EXTI_WAKERS: [AtomicWaker; EXTI_COUNT] = [NEW_AW; EXTI_COUNT];
 
 pub unsafe fn on_irq() {
-    let exti = unsafe { &*pac::EXTI::PTR };
+    let exti = &crate::pac::EXTI;
 
-    let bits = exti.intfr().read().bits();
+    let bits = exti.intfr().read();
 
     // We don't handle or change any EXTI lines above 24.
-    let bits = bits & 0x00FFFFFF;
+    let bits = bits.0 & 0x00FFFFFF;
 
-    exti.intenr().modify(|r, w| unsafe { w.bits(r.bits() & !bits) });
+    exti.intenr().modify(|w| w.0 = w.0 & !bits);
 
     // Wake the tasks
     for pin in BitIter(bits) {
@@ -28,7 +28,7 @@ pub unsafe fn on_irq() {
     }
 
     // Clear pending - Clears the EXTI's line pending bits.
-    exti.intfr().write(|w| w.bits(bits)); // write 1 to clear
+    exti.intfr().write(|w| w.0 = bits);
 }
 
 struct BitIter(u32);
@@ -123,29 +123,25 @@ struct ExtiInputFuture<'a> {
 impl<'a> ExtiInputFuture<'a> {
     fn new(pin: u8, port: u8, rising: bool, falling: bool) -> Self {
         critical_section::with(|_| {
-            let exti = unsafe { &*pac::EXTI::PTR };
-            let afio = unsafe { &*pac::AFIO::PTR };
+            let exti = &crate::pac::EXTI;
+            let afio = &crate::pac::AFIO;
 
             let port = port as u32;
 
             // AFIO_EXTICRx
             if pin < 16 {
                 let shift = pin * 2;
-                afio.exticr1()
-                    .modify(|r, w| unsafe { w.bits(r.bits() & !(0b11 << shift) | port << shift) });
+                afio.exticr1().modify(|w| w.0 = w.0 & !(0b11 << shift) | port << shift);
             } else {
                 let shift = (pin - 16) * 2;
-                afio.exticr2()
-                    .modify(|r, w| unsafe { w.bits(r.bits() & !(0b11 << shift) | port << shift) });
+                afio.exticr2().modify(|w| w.0 = w.0 & !(0b11 << shift) | port << shift);
             }
 
             // See-also: 7.4.3
-            exti.intenr().modify(|r, w| unsafe { w.bits(r.bits() | 1 << pin) });
+            exti.intenr().modify(|w| w.0 = w.0 | 1 << pin);
 
-            exti.rtenr()
-                .modify(|r, w| unsafe { w.bits(r.bits() | (rising as u32) << pin) });
-            exti.ftenr()
-                .modify(|r, w| unsafe { w.bits(r.bits() | (falling as u32) << pin) });
+            exti.rtenr().modify(|w| w.0 = w.0 | (rising as u32) << pin);
+            exti.ftenr().modify(|w| w.0 = w.0 | (falling as u32) << pin);
         });
 
         Self {
@@ -158,9 +154,9 @@ impl<'a> ExtiInputFuture<'a> {
 impl<'a> Drop for ExtiInputFuture<'a> {
     fn drop(&mut self) {
         critical_section::with(|_| {
+            let exti = &crate::pac::EXTI;
             let pin = self.pin;
-            let exti = unsafe { &*pac::EXTI::PTR };
-            exti.intenr().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << pin)) });
+            exti.intenr().modify(|w| w.0 = w.0 & !(1 << pin));
         });
     }
 }
@@ -169,11 +165,11 @@ impl<'a> Future for ExtiInputFuture<'a> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let exti = unsafe { &*pac::EXTI::PTR };
+        let exti = &crate::pac::EXTI;
 
         EXTI_WAKERS[self.pin as usize].register(cx.waker());
 
-        if exti.intenr().read().bits() & (1 << self.pin) == 0 {
+        if exti.intenr().read().mr(self.pin as _) == false {
             // intenr cleared by on_irq, then we can assume it is triggered
             Poll::Ready(())
         } else {

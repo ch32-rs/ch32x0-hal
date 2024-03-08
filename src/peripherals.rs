@@ -1,5 +1,3 @@
-use crate::pac;
-
 // We need to export this in the hal for the drivers to use
 
 crate::peripherals! {

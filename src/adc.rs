@@ -25,8 +25,6 @@ pub struct Config {
     /// Div1 to Div16
     // raw values are 0 to 0b111
     pub clkdiv: u8,
-    // TODO: handle "-1"
-    pub channel_count: u8,
 }
 
 impl Default for Config {
@@ -36,7 +34,6 @@ impl Default for Config {
             // Power on default is Div4,
             // Ofiicial SDK is Div6
             clkdiv: 0b0101,
-            channel_count: 1,
         }
     }
 }
@@ -48,35 +45,36 @@ pub struct Adc<'d, T: Instance> {
 }
 
 impl<'d, T: Instance> Adc<'d, T> {
-    pub fn new(adc: impl Peripheral<P = T> + 'd, delay: &mut impl DelayNs, config: Config) -> Self {
+    pub fn new(adc: impl Peripheral<P = T> + 'd, config: Config) -> Self {
         into_ref!(adc);
         T::enable_and_reset();
 
         T::regs().ctlr3().modify(|w| w.set_clk_div(config.clkdiv));
 
+        // clear, only independent mode is supported
         T::regs().ctlr1().modify(|w| {
             w.0 = 0;
-            // clear, only independent mode is supported
         });
 
         // no external trigger
         // no continuous mode
         T::regs().ctlr2().modify(|w| {
             w.set_align(false); // right aligned
-            w.set_extsel(0b111); //  SWSTART 软件触发
+            w.set_extsel(0b111); //  SWSTART Software trigger
+            w.set_cont(false); // single conversion
         });
+
+        const CHANNEL_COUNT: u8 = 1;
+        T::regs().rsqr1().modify(|w| w.set_l(CHANNEL_COUNT - 1));
 
         // ADC ON
         T::regs().ctlr2().modify(|w| w.set_adon(true));
-        delay.delay_us(1000);
-
-        T::regs().rsqr1().modify(|w| w.set_l(config.channel_count - 1));
 
         Self { adc }
     }
 
     // regular conversion
-    pub fn configure_channel(&mut self, channel: &mut impl AdcPin<T>, rank: u8, sample_time: SampleTime) {
+    fn configure_channel(&mut self, channel: &mut impl AdcPin<T>, rank: u8, sample_time: SampleTime) {
         channel.set_as_analog();
 
         let channel = channel.channel();
@@ -108,7 +106,9 @@ impl<'d, T: Instance> Adc<'d, T> {
 
     // Get_ADC_Val
     // FIXME: channel is not used
-    pub fn convert(&mut self, channel: &mut impl AdcPin<T>) -> u16 {
+    pub fn convert(&mut self, channel: &mut impl AdcPin<T>, sample_time: SampleTime) -> u16 {
+        self.configure_channel(channel, 1, sample_time);
+
         T::regs().ctlr2().modify(|w| w.set_swstart(true));
 
         // while not end of conversion

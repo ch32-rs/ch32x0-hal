@@ -31,7 +31,7 @@ pub mod signature;
 pub mod spi;
 // pub mod timer;
 pub mod usart;
-// pub mod usbpd;
+pub mod usbpd;
 
 #[cfg(feature = "embassy")]
 pub mod embassy;

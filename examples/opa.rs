@@ -29,8 +29,6 @@ async fn main(spawner: Spawner) -> ! {
     let mut p = hal::init(Default::default());
     hal::embassy::init();
 
-    let mut delay = Delay;
-
     // GPIO
     spawner.spawn(blink(p.PB12.degrade())).unwrap();
 
@@ -39,12 +37,11 @@ async fn main(spawner: Spawner) -> ! {
     let mut opa = hal::opa::OpAmp::new(p.OPA2);
     // IN PA7, OUT PA4
     // Undocumented: PA2 is not ADC usable.
-    let out = opa.buffer_non_inverting(&mut p.PA7, &mut p.PA4, hal::opa::OpAmpGain::Mul4);
+    opa.buffer_non_inverting(&mut p.PA7, &mut p.PA4, hal::opa::OpAmpGain::Mul4);
 
-    let mut adc = hal::adc::Adc::new(p.ADC1, &mut delay, Default::default());
+    let mut adc = hal::adc::Adc::new(p.ADC1, Default::default());
 
     let mut ch = p.PA4;
-    adc.configure_channel(&mut ch, 1, hal::adc::SampleTime::Cycles6);
 
     loop {
         //led.toggle();
@@ -52,7 +49,7 @@ async fn main(spawner: Spawner) -> ! {
         // Delay.delay_ms(1000_u32); // blocking delay
         Timer::after(Duration::from_millis(1000)).await;
 
-        let val = adc.convert(&mut ch);
+        let val = adc.convert(&mut ch, hal::adc::SampleTime::Cycles6);
         // div by 4
         let voltage = (val as u32) * 3300 / 4096 / 4;
 

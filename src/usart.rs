@@ -339,11 +339,6 @@ fn configure(rb: &pac::usart::Usart, config: &Config, enable_tx: bool, enable_rx
     Ok(())
 }
 
-// embedded-halpm
-mod eh1 {
-    use super::*;
-}
-
 // Peripheral traits
 
 pub trait Instance:

@@ -14,12 +14,12 @@ fn main() {
 
     // ========
     // Extract the rcc registers
-    let rcc_registers = METADATA
-        .peripherals
-        .iter()
-        .filter_map(|p| p.registers.as_ref())
-        .find(|r| r.kind == "rcc")
-        .unwrap();
+    // let rcc_registers = METADATA
+    //     .peripherals
+    //     .iter()
+    //     .filter_map(|p| p.registers.as_ref())
+    //     .find(|r| r.kind == "rcc")
+    //     .unwrap();
 
     for p in METADATA.peripherals {
         //if !singletons.contains(&p.name.to_string()) {
@@ -42,7 +42,7 @@ fn main() {
                 None => TokenStream::new(),
             };
 
-            let ptype = if let Some(reg) = &p.registers { reg.kind } else { "" };
+            // let ptype = if let Some(reg) = &p.registers { reg.kind } else { "" };
 
             let en_reg = format_ident!("{}", en.register.to_ascii_lowercase());
             let set_en_field = format_ident!("set_{}", en.field.to_ascii_lowercase());

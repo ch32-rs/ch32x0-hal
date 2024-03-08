@@ -9,7 +9,7 @@ edition = "2021"
 #    "rt",
 #], path = "../ch32-rs-nightlies/ch32x0" }
 
-ch32-metapac = { version = "0.0.2", features = [
+ch32-metapac = { version = "0.0.3", features = [
     "ch32x035f7p6",
     "memory-x",
     "rt",
@@ -43,7 +43,7 @@ bitfield = "0.14.0"
 heapless = "0.8.0"
 
 [build-dependencies]
-ch32-metapac = { version = "0.0.2", features = [
+ch32-metapac = { version = "0.0.3", features = [
     "ch32x035f7p6",
     "metadata",
 ], path = "../ch32-data/build/ch32-metapac" }

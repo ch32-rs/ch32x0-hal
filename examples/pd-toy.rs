@@ -97,6 +97,10 @@ async fn main(spawner: Spawner) -> ! {
     }
     Timer::after(Duration::from_millis(1000)).await;
 
+    pd.dump_pdo(raw);
+
+    loop {}
+
     let ret = pd.enter_epr().await;
     println!("Enter EPR: {:?}", ret);
 
@@ -135,9 +139,8 @@ async fn main(spawner: Spawner) -> ! {
     //    pd.get_cap().await;
     // }
 
-    let mut adc = hal::adc::Adc::new(p.ADC, &mut delay, Default::default());
+    let mut adc = hal::adc::Adc::new(p.ADC1, Default::default());
     let mut ch = p.PB1;
-    adc.configure_channel(&mut ch, 1, hal::adc::SampleTime::Cycles6);
 
     // Display
     // SPI1, remap 0
@@ -216,7 +219,7 @@ async fn main(spawner: Spawner) -> ! {
 
         // draw graph
 
-        let val = adc.convert(&mut ch);
+        let val = adc.convert(&mut ch, hal::adc::SampleTime::Cycles6);
         // val as f32 / 4096.0 * 3.3 / 12.0 * (12.0 + 68.0);
         let voltage = (val as u32) * 3300 * (12 + 120) / 4096 / 12;
 
